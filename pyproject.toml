@@ -1,0 +1,69 @@
+[project]
+name = "poly-chatterbox"
+version = "0.1.0"
+description = "Chatterbox TTS toolkit: voice cloning with Chatterbox, Turbo, Nano and Multilingual, plus voice conversion — via web UI, REST API and CLI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "python-multipart>=0.0.9",
+    "numpy>=1.26",
+    "soundfile>=0.12",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# The real inference backend (the vendored `chatterbox` package's dependencies, as pinned upstream).
+# Without it the app still runs on the mock backend.
+chatterbox = [
+    # numpy 1.x for Python < 3.13 (no 1.x wheels on 3.13+), numpy 2.x for 3.13+
+    "numpy>=1.26,<2.0.0; python_version < '3.13'",
+    "numpy>=2.0.0; python_version >= '3.13'",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "librosa==0.11.0",
+    "s3tokenizer",
+    "transformers==5.2.0",
+    "diffusers==0.29.0",
+    "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
+    "conformer==0.3.2",
+    "safetensors==0.5.3",
+    "spacy-pkuseg",
+    "pykakasi==2.3.0",
+    "pyloudnorm",
+    "omegaconf",
+]
+
+[project.scripts]
+poly-chatterbox = "poly_chatterbox.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/poly_chatterbox", "src/chatterbox"]
+
+[tool.uv]
+python-preference = "managed"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

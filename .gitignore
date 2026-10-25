@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+/data/
+/outputs/
+*.egg-info/
+.env
+# TLS certificates (generated on first boot of the HTTPS stack)
+certs/
+# Generated audio
+*.wav
