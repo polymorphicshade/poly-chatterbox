@@ -19,6 +19,7 @@ from .backends import (GENERATION_OPTIONS, MULTILINGUAL, MULTILINGUAL_VERSIONS, 
 from .config import Settings, get_settings
 from .languages import LANGUAGES, SAMPLES, normalize_language
 from .library import DEFAULT_VOICE, Voice, VoiceLibrary
+from .presets import apply_preset
 from .prompts import Prompt, PromptStore
 from .text import parse_markup
 
@@ -63,18 +64,18 @@ class Engine:
     # ================================================================ core features
 
     def original(self, text: str, ref_audio: Optional[Audio] = None, voice_id: Optional[str] = None,
-                 params: Optional[GenerationParams] = None) -> SynthesisResult:
+                 params: Optional[GenerationParams] = None, preset: Optional[str] = None) -> SynthesisResult:
         """Chatterbox (English, 500M): zero-shot cloning with exaggeration and CFG/pace control."""
-        return self._tts(ORIGINAL, text, ref_audio, voice_id, params or GenerationParams())
+        return self._tts(ORIGINAL, text, ref_audio, voice_id, params or GenerationParams(), preset=preset)
 
     def turbo(self, text: str, ref_audio: Optional[Audio] = None, voice_id: Optional[str] = None,
-              params: Optional[GenerationParams] = None, nano: bool = False) -> SynthesisResult:
+              params: Optional[GenerationParams] = None, nano: bool = False, preset: Optional[str] = None) -> SynthesisResult:
         """Chatterbox-Turbo (350M) or -Nano (110M): fast English TTS with paralinguistic tags like [laugh]."""
-        return self._tts(NANO if nano else TURBO, text, ref_audio, voice_id, params or GenerationParams())
+        return self._tts(NANO if nano else TURBO, text, ref_audio, voice_id, params or GenerationParams(), preset=preset)
 
     def multilingual(self, text: str, language: str, ref_audio: Optional[Audio] = None,
                      voice_id: Optional[str] = None, version: Optional[str] = None,
-                     params: Optional[GenerationParams] = None) -> SynthesisResult:
+                     params: Optional[GenerationParams] = None, preset: Optional[str] = None) -> SynthesisResult:
         """Chatterbox Multilingual (23 languages). Without a voice, the language's sample speaker is used."""
         lang = normalize_language(language)
         version = (version or self.settings.multilingual_version).strip().lower()
@@ -83,7 +84,7 @@ class Engine:
         if ref_audio is None and not voice_id and lang in SAMPLES:
             voice_id = f"sample_{lang}"
         p = params or GenerationParams()
-        return self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version)
+        return self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version, preset=preset)
 
     def convert(self, source: Audio, target_audio: Optional[Audio] = None,
                 target_voice_id: Optional[str] = None) -> SynthesisResult:
@@ -157,12 +158,14 @@ class Engine:
     # ================================================================ internals
 
     def _tts(self, model: str, text: str, ref_audio: Optional[Audio], voice_id: Optional[str],
-             params: GenerationParams, language: Optional[str] = None, version: Optional[str] = None) -> SynthesisResult:
+             params: GenerationParams, language: Optional[str] = None, version: Optional[str] = None,
+             preset: Optional[str] = None) -> SynthesisResult:
         if not text or not text.strip():
             raise ValueError("Text is required.")
         if ref_audio is not None and voice_id:
             raise ValueError("Give at most one of ref_audio or voice_id.")
-        segments = parse_markup(text, self.settings.max_chunk_chars)
+        params = apply_preset(preset, params, model)  # explicit options win over the preset's
+        segments = parse_markup(text, self.settings.max_chunk_chars, model)
         warnings: list[str] = []
         voice, label = self._voice(ref_audio, voice_id, warnings)
 
@@ -197,6 +200,8 @@ class Engine:
             wavs.update(zip(indices, out))
         pieces = [A.silence(s.pause, sr) if s.is_pause else wavs[i] for i, s in enumerate(segments)]
         details: dict[str, Any] = {"model": MODEL_LABELS[model] + (f" {version}" if version else "")}
+        if preset:
+            details["preset"] = preset.strip().lower()
         used = list(dict.fromkeys(voices[k[0]][1] for k in runs))
         if len(used) > 1:
             details["voices"] = used

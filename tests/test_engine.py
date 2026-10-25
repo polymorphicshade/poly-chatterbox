@@ -171,3 +171,45 @@ def test_transcribe(engine):
     assert engine.backend.calls[-1] == ("transcribe", {"language": None})
     with pytest.raises(ValueError, match="silent"):
         engine.transcribe((np.zeros(16000, dtype=np.float32), 16000))
+
+
+def test_emotion_presets(engine):
+    from poly_chatterbox.presets import EMOTION_PRESETS, apply_preset, preset_options
+    from poly_chatterbox.backends import GENERATION_OPTIONS
+
+    # Every preset is within the option ranges and sets something each model uses.
+    for name, preset in EMOTION_PRESETS.items():
+        for key, value in preset["options"].items():
+            opt = GENERATION_OPTIONS[key]
+            assert opt["min"] <= value <= opt["max"] if opt["max"] is not None else opt["min"] <= value, (name, key)
+        for model in ("original", "turbo", "nano", "multilingual"):
+            assert preset_options(name, model)
+
+    # Per model: Turbo ignores exaggeration / CFG, so they are left out rather than warned about.
+    assert "exaggeration" in preset_options("angry", "original")
+    assert "exaggeration" not in preset_options("angry", "turbo") and "top_k" in preset_options("angry", "turbo")
+    with pytest.raises(ValueError, match="Unknown emotion preset"):
+        preset_options("giddy")
+
+    # Explicit options win over the preset.
+    merged = apply_preset("excited", GenerationParams(temperature=0.5, seed=3), "original")
+    assert merged.temperature == 0.5 and merged.exaggeration == 0.9 and merged.seed == 3 and merged.top_k is None
+
+    res = engine.original("Hello", preset="Sad", params=GenerationParams(cfg_weight=0.1))
+    sent = last_call(engine, "synthesize")["params"]
+    assert (sent.exaggeration, sent.cfg_weight) == (0.4, 0.1) and res.details["preset"] == "sad" and not res.warnings
+    res = engine.turbo("Hi", preset="angry")
+    assert last_call(engine, "synthesize")["params"].exaggeration is None and not res.warnings
+    with pytest.raises(ValueError, match="Unknown emotion preset"):
+        engine.multilingual("Hola", "es", preset="giddy")
+
+
+def test_preset_in_settings_markup(engine):
+    engine.original("Calm. [settings preset=angry temperature=0.5]Loud![/settings]")
+    calls = [c[1]["params"] for c in engine.backend.calls if c[0] == "synthesize"]
+    assert calls[0].exaggeration is None
+    assert (calls[1].exaggeration, calls[1].temperature) == (1.1, 0.5)
+    res = engine.turbo("[settings preset=angry]Loud![/settings]")
+    assert not res.warnings and last_call(engine, "synthesize")["params"].exaggeration is None
+    with pytest.raises(ValueError, match="Unknown emotion preset"):
+        engine.original("[settings preset=giddy]x[/settings]")

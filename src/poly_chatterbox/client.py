@@ -35,15 +35,17 @@ class LocalClient:
 
         return GenerationParams(**(gen or {}))
 
-    def original(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None) -> Result:
-        return self._out(self.engine.original(text, _load(ref_audio), voice_id, self._params(generation)))
+    def original(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, preset=None) -> Result:
+        return self._out(self.engine.original(text, _load(ref_audio), voice_id, self._params(generation), preset))
 
-    def turbo(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, nano=False) -> Result:
-        return self._out(self.engine.turbo(text, _load(ref_audio), voice_id, self._params(generation), nano))
+    def turbo(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, nano=False,
+              preset=None) -> Result:
+        return self._out(self.engine.turbo(text, _load(ref_audio), voice_id, self._params(generation), nano, preset))
 
     def multilingual(self, text, language, ref_audio: Optional[Path] = None, voice_id=None, version=None,
-                     generation=None) -> Result:
-        return self._out(self.engine.multilingual(text, language, _load(ref_audio), voice_id, version, self._params(generation)))
+                     generation=None, preset=None) -> Result:
+        return self._out(self.engine.multilingual(text, language, _load(ref_audio), voice_id, version,
+                                                  self._params(generation), preset))
 
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._out(self.engine.convert(load_audio(source_audio), _load(target_audio), target_voice_id))
@@ -82,6 +84,11 @@ class LocalClient:
 
     def transcribe(self, audio: Path, language=None) -> dict:
         return self.engine.transcribe(load_audio(audio), language)
+
+    def presets(self) -> list[dict]:
+        from .presets import describe_presets
+
+        return describe_presets()
 
     def info(self) -> dict:
         from .backends import GENERATION_OPTIONS
@@ -126,17 +133,20 @@ class HttpClient:
         data = {k: (json.dumps(v) if isinstance(v, dict) else v) for k, v in data.items() if v is not None}
         return self._audio(self.http.post(path, data=data, files=self._files(**files)))
 
-    def original(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None) -> Result:
-        return self._post_form("/api/tts/original", dict(text=text, voice_id=voice_id, generation=generation), ref_audio=ref_audio)
+    def original(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, preset=None) -> Result:
+        return self._post_form("/api/tts/original", dict(text=text, voice_id=voice_id, generation=generation, preset=preset),
+                               ref_audio=ref_audio)
 
-    def turbo(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, nano=False) -> Result:
+    def turbo(self, text, ref_audio: Optional[Path] = None, voice_id=None, generation=None, nano=False,
+              preset=None) -> Result:
         return self._post_form("/api/tts/nano" if nano else "/api/tts/turbo",
-                               dict(text=text, voice_id=voice_id, generation=generation), ref_audio=ref_audio)
+                               dict(text=text, voice_id=voice_id, generation=generation, preset=preset), ref_audio=ref_audio)
 
     def multilingual(self, text, language, ref_audio: Optional[Path] = None, voice_id=None, version=None,
-                     generation=None) -> Result:
+                     generation=None, preset=None) -> Result:
         return self._post_form("/api/tts/multilingual", dict(text=text, language=language, voice_id=voice_id,
-                                                              version=version, generation=generation), ref_audio=ref_audio)
+                                                              version=version, generation=generation, preset=preset),
+                               ref_audio=ref_audio)
 
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._post_form("/api/vc", dict(target_voice_id=target_voice_id),
@@ -183,6 +193,9 @@ class HttpClient:
     def transcribe(self, audio: Path, language=None) -> dict:
         data = {"language": language} if language else None
         return self._check(self.http.post("/api/transcribe", data=data, files=self._files(audio=audio))).json()
+
+    def presets(self) -> list[dict]:
+        return self._check(self.http.get("/api/presets")).json()
 
     def info(self) -> dict:
         return self._check(self.http.get("/api/info")).json()

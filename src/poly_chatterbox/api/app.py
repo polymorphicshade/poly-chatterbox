@@ -22,6 +22,7 @@ from ..audio import Audio, load_audio
 from ..backends import GENERATION_OPTIONS, MULTILINGUAL_VERSIONS, BackendError
 from ..engine import MODEL_LABELS, Engine, SynthesisResult, get_engine
 from ..languages import LANGUAGES, SAMPLES
+from ..presets import describe_presets
 from ..text import EVENT_TAGS
 from .schemas import GenerationOptions, PromptRequest, params
 
@@ -35,6 +36,7 @@ TEXT = Form(..., description="Text to speak. Long text is split at sentences. Ma
                              "generation options or voice for just that span.")
 REF_AUDIO = File(None, description="Reference clip of the voice to clone, 5 s or longer (WAV/FLAC/OGG/MP3).")
 VOICE_ID = Form(None, description="Or a library voice (see GET /api/voices). Neither: the model's built-in voice.")
+PRESET = Form(None, description="Emotion preset (see GET /api/presets), e.g. excited or sad. Options in `generation` win over it.")
 GENERATION = Form(None, description="GenerationOptions (see Schemas) as JSON, e.g. {\"temperature\": 0.7, \"seed\": 1}.")
 
 
@@ -122,10 +124,16 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
             "multilingual_versions": {"default": e.settings.multilingual_version, "choices": list(MULTILINGUAL_VERSIONS)},
             "event_tags": EVENT_TAGS,
             "generation_options": GENERATION_OPTIONS,
+            "presets": describe_presets(),
             "voice_counts": {k: sum(v.kind == k for v in voices) for k in ("builtin", "sample", "cloned")},
             "reference_audio": {"min_seconds": e.settings.min_ref_seconds, "max_seconds": e.settings.max_ref_seconds},
             "max_chunk_chars": e.settings.max_chunk_chars,
         }
+
+    @app.get("/api/presets", tags=["meta"])
+    def presets():
+        """Emotion presets: named bundles of generation options (exaggeration, CFG / pace, sampling) for a mood."""
+        return describe_presets()
 
     @app.post("/api/watermark", tags=["meta"])
     async def watermark(audio: UploadFile = File(..., description="Audio to check (WAV/FLAC/OGG/MP3).")):
@@ -212,27 +220,30 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
 
     @app.post("/api/tts/original", tags=["tts"], response_class=Response, responses=WAV)
     async def original(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
-                       voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION):
+                       voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
+                       preset: Optional[str] = PRESET):
         """Chatterbox (English, 500M): voice cloning with exaggeration and CFG/pace control."""
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
-        return _audio_response(await run_in_threadpool(eng().original, text, ref, voice_id or None, params(gen)))
+        return _audio_response(await run_in_threadpool(eng().original, text, ref, voice_id or None, params(gen), preset or None))
 
-    async def _turbo(text, ref_audio, voice_id, generation, nano: bool) -> Response:
+    async def _turbo(text, ref_audio, voice_id, generation, preset, nano: bool) -> Response:
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
-        result = await run_in_threadpool(eng().turbo, text, ref, voice_id or None, params(gen), nano)
+        result = await run_in_threadpool(eng().turbo, text, ref, voice_id or None, params(gen), nano, preset or None)
         return _audio_response(result)
 
     @app.post("/api/tts/turbo", tags=["tts"], response_class=Response, responses=WAV)
     async def turbo(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
-                    voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION):
+                    voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
+                    preset: Optional[str] = PRESET):
         """Chatterbox-Turbo (English, 350M): low-latency TTS with paralinguistic tags such as [laugh] and [cough]."""
-        return await _turbo(text, ref_audio, voice_id, generation, nano=False)
+        return await _turbo(text, ref_audio, voice_id, generation, preset, nano=False)
 
     @app.post("/api/tts/nano", tags=["tts"], response_class=Response, responses=WAV)
     async def nano(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
-                   voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION):
+                   voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
+                   preset: Optional[str] = PRESET):
         """Chatterbox-Nano (English, 110M): Turbo's architecture in a CPU-friendly size, with the same tags."""
-        return await _turbo(text, ref_audio, voice_id, generation, nano=True)
+        return await _turbo(text, ref_audio, voice_id, generation, preset, nano=True)
 
     @app.post("/api/tts/multilingual", tags=["tts"], response_class=Response, responses=WAV)
     async def multilingual(
@@ -242,10 +253,12 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         voice_id: Optional[str] = Form(None, description="Or a library voice. Neither: the language's sample speaker."),
         version: Optional[str] = Form(None, description="Checkpoint: v3 (recommended) or v2. Default: server setting."),
         generation: Optional[str] = GENERATION,
+        preset: Optional[str] = PRESET,
     ):
         """Chatterbox Multilingual (23 languages): voice cloning across languages."""
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
-        result = await run_in_threadpool(eng().multilingual, text, language, ref, voice_id or None, version or None, params(gen))
+        result = await run_in_threadpool(eng().multilingual, text, language, ref, voice_id or None, version or None,
+                                         params(gen), preset or None)
         return _audio_response(result)
 
     @app.post("/api/vc", tags=["tts"], response_class=Response, responses=WAV)

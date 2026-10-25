@@ -5,6 +5,7 @@ Inline markup
 ``[pause]``                                           insert 0.5 s of silence
 ``[pause 800ms]`` / ``[pause 1.5s]`` / ``[pause 2]``    explicit length (bare numbers are seconds)
 ``[settings exaggeration=0.9 cfg_weight=0.3]…[/settings]``   generation options for that span only
+``[settings preset=excited temperature=0.7]…[/settings]``   an emotion preset (see presets.py), then overrides
 ``[voice: sample_de]…[/voice]``                       a library voice for that span only
 
 Spans can be nested (inner ``[settings]`` add to or override outer ones) and the two kinds can be
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .backends.base import GENERATION_OPTIONS
+from .presets import preset_options
 
 DEFAULT_PAUSE_SECONDS = 0.5
 MAX_PAUSE_SECONDS = 10.0
@@ -124,9 +126,14 @@ def _convert(name: str, raw: str) -> Any:
     return value
 
 
-def parse_settings(opts: Optional[str]) -> dict[str, Any]:
-    """Parse the ``name=value`` pairs of a ``[settings …]`` tag."""
+def parse_settings(opts: Optional[str], model: Optional[str] = None) -> dict[str, Any]:
+    """Parse the ``name=value`` pairs of a ``[settings …]`` tag.
+
+    ``preset=name`` expands to that emotion preset's options (those ``model`` uses, if given); options
+    written in the same tag win over it, whatever their order.
+    """
     out: dict[str, Any] = {}
+    preset: dict[str, Any] = {}
     for token in filter(None, re.split(r"[\s,]+", (opts or "").strip())):
         name, sep, raw = token.partition("=")
         name = name.lower()
@@ -134,16 +141,23 @@ def parse_settings(opts: Optional[str]) -> dict[str, Any]:
             raise ValueError(f"Bad [settings] option {token!r}: write name=value, e.g. exaggeration=0.8.")
         if name == "seed":
             raise ValueError("seed can't be set inside [settings]: it applies to the whole request.")
+        if name == "preset":
+            preset = preset_options(raw, model)
+            continue
         if name not in SPAN_OPTIONS:
-            raise ValueError(f"Unknown [settings] option {name!r}. Use: {', '.join(SPAN_OPTIONS)}.")
+            raise ValueError(f"Unknown [settings] option {name!r}. Use: preset, {', '.join(SPAN_OPTIONS)}.")
         out[name] = _convert(name, raw)
+    out = {**preset, **out}
     if not out:
         raise ValueError("[settings] needs at least one option, e.g. [settings exaggeration=0.8].")
     return out
 
 
-def parse_markup(text: str, max_chars: int = 300) -> list[Segment]:
-    """Split text into speech chunks and pauses according to the inline markup."""
+def parse_markup(text: str, max_chars: int = 300, model: Optional[str] = None) -> list[Segment]:
+    """Split text into speech chunks and pauses according to the inline markup.
+
+    ``model`` limits the options that ``[settings preset=…]`` expands to the ones that model uses.
+    """
     segments: list[Segment] = []
     settings_stack: list[dict[str, Any]] = []  # each entry is the merged settings in effect
     voice_stack: list[str] = []
@@ -164,7 +178,7 @@ def parse_markup(text: str, max_chars: int = 300) -> list[Segment]:
             if seconds > 0:
                 segments.append(Segment(pause=min(seconds, MAX_PAUSE_SECONDS)))
         elif m.group("settings") is not None:
-            merged = {**(settings_stack[-1] if settings_stack else {}), **parse_settings(m.group("opts"))}
+            merged = {**(settings_stack[-1] if settings_stack else {}), **parse_settings(m.group("opts"), model)}
             settings_stack.append(merged)
         elif m.group("voice") is not None:
             voice_stack.append(m.group("vid").strip())

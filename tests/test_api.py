@@ -187,3 +187,20 @@ def test_transcribe(client):
 def test_web_ui_has_whisper_tab(client):
     js = client.get("/static/app.js").text
     assert '"whisper"' in js and "/api/transcribe" in js
+
+
+def test_presets(client):
+    presets = client.get("/api/presets").json()
+    assert {"happy", "sad", "angry"} <= {p["id"] for p in presets} and presets == client.get("/api/info").json()["presets"]
+    res = client.post("/api/tts/original", data={"text": "Hi", "preset": "excited",
+                                                 "generation": json.dumps({"temperature": 0.5})})
+    assert_wav(res)
+    assert meta(res)["preset"] == "excited"
+    assert_wav(client.post("/api/tts/multilingual", data={"text": "Hola", "language": "es", "preset": "calm"}))
+    assert_wav(client.post("/api/tts/turbo", data={"text": "Hi", "preset": "sad"}))
+    bad = client.post("/api/tts/nano", data={"text": "Hi", "preset": "giddy"})
+    assert bad.status_code == 400 and "Unknown emotion preset" in bad.json()["detail"]
+
+
+def test_web_ui_has_presets(client):
+    assert "data-preset" in client.get("/static/app.js").text

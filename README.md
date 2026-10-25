@@ -8,6 +8,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Chatterbox-Nano (English, 110M, CPU-friendly) | Nano | `POST /api/tts/nano` | `poly-chatterbox nano` |
 | Chatterbox Multilingual v3 / v2 (23 languages) | Multilingual | `POST /api/tts/multilingual` | `poly-chatterbox multilingual` |
 | Original Chatterbox (English, 500M) with exaggeration and CFG/pace | Original | `POST /api/tts/original` | `poly-chatterbox original` |
+| Emotion presets (mood bundles of generation options) | "Emotion preset" under the text | `GET /api/presets`, `preset` on each TTS endpoint | `poly-chatterbox presets`, `--emotion` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
@@ -245,6 +246,20 @@ Leave them unset to use the model defaults. The web UI shows this advice next to
 
 Options a model doesn't use are ignored, with a warning in the result metadata.
 
+### Emotion presets
+
+Chatterbox has no emotion switch, so the presets set the controls that move the delivery towards a mood: `exaggeration`, `cfg_weight` and the sampling options. Available: `neutral`, `happy`, `excited`, `playful`, `sad`, `tired`, `calm`, `serious`, `nervous`, `angry` and `dramatic`. They are a starting point, not a guarantee: results vary with the voice, so pair a preset with a `seed` and nudge the sliders.
+
+* **Web UI:** pick one under *Emotion preset*; it fills in the sliders and options for the current model, which you can keep adjusting. (Turbo and Nano have no exaggeration or CFG, so for them a preset only changes the sampling.) It also works with *Wrap selection in settings* to give just one line a mood.
+* **Markup:** `[settings preset=sad]…[/settings]` gives a span a preset; options in the same tag win over it, e.g. `[settings preset=angry temperature=0.6]`.
+* **API:** `GET /api/presets` lists them with their options; the `preset` form field on `/api/tts/*` applies one. Options in `generation` win over the preset.
+* **CLI:** `poly-chatterbox presets` lists them, and `--emotion NAME` applies one on `original`, `turbo`, `nano` and `multilingual`; explicit options like `--temperature` win.
+
+```sh
+poly-chatterbox original "I can't believe you did that." --emotion angry --seed 4
+curl -X POST localhost:8000/api/tts/original -F text="We won!" -F preset=excited -o won.wav
+```
+
 ## API
 
 Synthesis endpoints take multipart form data and return `audio/wav`. Metadata (duration, model, voice, warnings, …) comes back in the `X-TTS-Metadata` header as URL-encoded JSON. Give the voice as an uploaded `ref_audio` clip or a library `voice_id` (neither uses the built-in voice), and sampling options as a JSON `generation` field.
@@ -291,7 +306,7 @@ The Whisper mode is a plain speech-to-text tool: upload or record audio, optiona
 uv run pytest      # uses the mock backend; no GPU needed
 ```
 
-Layout: `src/poly_chatterbox/` contains `engine.py` (the feature logic), `backends/` (chatterbox, mock), `text.py` (pause markup and chunking), `library.py` (the voice library), `languages.py`, `api/` (FastAPI), `web/` (UI) and `cli.py`. `stream.py` is the live voice conversion client, and `prompts.py` the saved prompts. `src/chatterbox/` is the vendored upstream model code.
+Layout: `src/poly_chatterbox/` contains `engine.py` (the feature logic), `backends/` (chatterbox, mock), `text.py` (pause markup and chunking), `presets.py` (emotion presets), `library.py` (the voice library), `languages.py`, `api/` (FastAPI), `web/` (UI) and `cli.py`. `stream.py` is the live voice conversion client, and `prompts.py` the saved prompts. `src/chatterbox/` is the vendored upstream model code.
 
 ## Disclaimer
 

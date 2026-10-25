@@ -53,7 +53,7 @@ function newWorkspace(name) {
     id: uid(), name: name || `Workspace ${app.workspaces.length + 1}`, mode: "turbo",
     text: SAMPLE_TEXTS.turbo, language: "fr", version: "",
     voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", promptId: "", saveName: "",
-    voiceFilter: { q: "", kind: "" }, gen: {}, whisperLang: "",
+    voiceFilter: { q: "", kind: "" }, gen: {}, whisperLang: "", preset: {},
   };
 }
 
@@ -360,6 +360,36 @@ function genOptions(model) {
   return Object.entries(app.info?.generation_options || {}).filter(([, o]) => model in o.defaults);
 }
 
+// Emotion presets (GET /api/info → presets): picking one fills in the generation options the model uses.
+function presetField(ws, model) {
+  const presets = app.info?.presets || [];
+  if (!presets.length) return "";
+  const current = presets.find((p) => p.id === ws.preset[ws.mode]);
+  const used = genOptions(model).map(([k]) => k);
+  return `<div class="field"><label for="${ws.id}-preset">Emotion preset</label>
+    <select id="${ws.id}-preset" data-preset>
+      <option value="">Custom (your own settings)</option>
+      ${presets.map((p) => `<option value="${esc(p.id)}" ${p.id === current?.id ? "selected" : ""}>${esc(p.label)}</option>`).join("")}
+    </select>
+    <div class="help">${current ? esc(current.description) + " Sets " + Object.keys(current.options).filter((k) => used.includes(k)).map((k) => esc(app.info.generation_options[k]?.label || k)).join(", ") + "; you can still adjust them below."
+      : "Starts the settings below from a mood. " + (model === "turbo" || model === "nano" ? "Turbo and Nano have no exaggeration or CFG, so presets only change their sampling." : "")}</div></div>`;
+}
+
+function applyPreset(ws, id) {
+  const preset = (app.info?.presets || []).find((p) => p.id === id);
+  ws.preset[ws.mode] = preset ? preset.id : "";
+  if (preset) {
+    const model = modeOf(ws).model;
+    const used = genOptions(model).map(([k]) => k);
+    const gen = {};
+    if (ws.gen[ws.mode]?.seed != null) gen.seed = ws.gen[ws.mode].seed;
+    for (const [k, v] of Object.entries(preset.options)) if (used.includes(k)) gen[k] = v;
+    ws.gen[ws.mode] = gen;
+  }
+  save();
+  renderForm(ws);
+}
+
 function slidersField(ws, model) {
   const g = ws.gen[ws.mode] || {};
   const fields = genOptions(model).filter(([, o]) => o.primary).map(([k, o]) => {
@@ -406,7 +436,7 @@ function renderForm(ws) {
   let submit = "Generate";
   if (mode.model) {
     html = (mode.model === "multilingual" ? languageField(ws) : "") + voiceField(ws) + textField(ws, mode.model)
-      + slidersField(ws, mode.model) + generationField(ws, mode.model);
+      + presetField(ws, mode.model) + slidersField(ws, mode.model) + generationField(ws, mode.model);
   } else if (mode.id === "vc") {
     html = audioField(ws, "source", "Speech to convert", "No recording yet. Upload or record the speech whose voice you want to change.")
       + voiceField(ws, { label: "Target voice", target: true });
@@ -450,6 +480,11 @@ function bindForm(ws, form) {
       setPath(ws, key, value);
       if (input.hasAttribute("data-slider")) input.closest(".slider").querySelector("output").textContent = input.value;
       if (key.startsWith("gen.")) {
+        if (ws.preset[ws.mode]) {  // the user moved off the preset's values
+          ws.preset[ws.mode] = "";
+          const picker = form.querySelector("[data-preset]");
+          if (picker) picker.value = "";
+        }
         const preview = form.querySelector(".settings-preview");
         if (preview) preview.innerHTML = settingsPreview(ws);
       }
@@ -458,6 +493,7 @@ function bindForm(ws, form) {
     };
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", handler);
   });
+  form.querySelector("[data-preset]")?.addEventListener("change", (e) => applyPreset(ws, e.target.value));
   form.querySelectorAll("[data-filter]").forEach((input) => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", () => {
       ws.voiceFilter[input.dataset.filter] = input.value;
@@ -482,6 +518,7 @@ function bindForm(ws, form) {
   form.querySelectorAll("[data-record]").forEach((b) => b.addEventListener("click", () => toggleRecording(ws, b.dataset.record)));
   form.querySelector("[data-action='reset-gen']")?.addEventListener("click", () => {
     ws.gen[ws.mode] = {};
+    ws.preset[ws.mode] = "";
     save();
     renderForm(ws);
   });
@@ -688,6 +725,7 @@ function loadPrompt(ws) {
   else if (p.voice_id) { ws.voiceSource = "library"; ws.voiceId = p.voice_id; }
   else if (ws.mode === "multilingual") ws.voiceSource = "sample";
   ws.gen[ws.mode] = { ...(p.generation || {}) };
+  ws.preset[ws.mode] = "";
   save();
   renderModes(ws);
   renderForm(ws);

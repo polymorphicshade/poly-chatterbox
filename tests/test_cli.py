@@ -98,3 +98,18 @@ def test_transcribe(engine, ref_wav, capsys):
     assert code == 0 and stdout.startswith("Placeholder transcript"), err
     code, stdout, _ = run(capsys, "transcribe", str(ref_wav), "--json")
     assert json.loads(stdout)["segments"]
+
+
+def test_emotion_presets(engine, tmp_path, capsys):
+    out = tmp_path / "e.wav"
+    code, stdout, err = run(capsys, "original", "Hi", "--emotion", "angry", "--temperature", "0.5", "-o", str(out), "--json")
+    assert code == 0, err
+    assert json.loads(stdout)["preset"] == "angry"
+    sent = [c for c in engine.backend.calls if c[0] == "synthesize"][-1][1]["params"]
+    assert (sent.exaggeration, sent.temperature) == (1.1, 0.5)
+    code, stdout, _ = run(capsys, "presets")
+    assert code == 0 and "happy" in stdout and "exaggeration=" in stdout
+    code, stdout, _ = run(capsys, "presets", "--json")
+    assert {p["id"] for p in json.loads(stdout)} >= {"sad", "excited"}
+    with pytest.raises(SystemExit):
+        main(["--backend", "mock", "turbo", "Hi", "--emotion", "giddy"])
