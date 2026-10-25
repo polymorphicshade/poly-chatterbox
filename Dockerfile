@@ -5,7 +5,7 @@
 # they download on first use into /data/cache (mount a volume there).
 #
 #   docker build -t poly-chatterbox .
-#   docker run --gpus all -p 8000:8000 -v chatterbox-cache:/data/cache -v chatterbox-library:/data/library poly-chatterbox
+#   docker run --gpus all -p 8000:8000 -v chatterbox-cache:/data/cache -v chatterbox-library:/data/library -v chatterbox-prompts:/data/prompts poly-chatterbox
 
 ARG PYTHON_VERSION=3.12
 
@@ -43,7 +43,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 app \
-    && mkdir -p /data/cache /data/library \
+    && mkdir -p /data/cache /data/library /data/prompts \
     && chown -R app:app /data
 
 COPY --from=build /opt/venv /opt/venv
@@ -56,11 +56,12 @@ ENV PATH=/opt/venv/bin:$PATH \
     NUMBA_CACHE_DIR=/data/cache/numba \
     HF_HUB_DISABLE_TELEMETRY=1 \
     POLY_CHATTERBOX_DATA_DIR=/data/library \
+    POLY_CHATTERBOX_PROMPTS_DIR=/data/prompts \
     POLY_CHATTERBOX_SERVE_ARGS=""
 
 USER app
 WORKDIR /data
-VOLUME ["/data/cache", "/data/library"]
+VOLUME ["/data/cache", "/data/library", "/data/prompts"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

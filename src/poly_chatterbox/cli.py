@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .backends.base import GENERATION_OPTIONS, MULTILINGUAL, MULTILINGUAL_VERSIONS, NANO, ORIGINAL, TURBO
+from .backends.base import GENERATION_OPTIONS, MULTILINGUAL, MULTILINGUAL_VERSIONS, NANO, ORIGINAL, TTS_MODELS, TURBO
 from .languages import LANGUAGES
 
 
@@ -60,8 +60,11 @@ def _add_output(p: argparse.ArgumentParser) -> None:
 
 
 def _add_tts(p: argparse.ArgumentParser, models: tuple[str, ...]) -> None:
-    p.add_argument("text", nargs="?", help="Text to speak ('-' or omitted: read stdin). Supports [pause 500ms].")
+    p.add_argument("text", nargs="?", help="Text to speak ('-' or omitted: read stdin). Supports [pause 500ms], "
+                                           "[settings …]…[/settings] and [voice: id]…[/voice].")
     p.add_argument("--text-file", help="Read the text from a file.")
+    p.add_argument("--prompt", metavar="ID", help="Start from a saved prompt (see `prompts list`): its text, voice and "
+                                                  "generation options are used unless you give your own.")
     voice = p.add_mutually_exclusive_group()
     voice.add_argument("--ref-audio", type=Path, help="Reference clip of the voice to clone, >= 5 s (WAV/FLAC/OGG/MP3).")
     voice.add_argument("--voice", help="Library voice id (see `poly-chatterbox voices list`).")
@@ -103,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("multilingual", help="Chatterbox Multilingual: 23 languages.")
     _add_tts(p, (MULTILINGUAL,))
-    p.add_argument("-l", "--language", required=True, help=f"Language of the text, code or name ({', '.join(LANGUAGES)}).")
+    p.add_argument("-l", "--language", help=f"Language of the text, code or name ({', '.join(LANGUAGES)}). "
+                                            "Required unless --prompt has one.")
     p.add_argument("--model-version", choices=MULTILINGUAL_VERSIONS, help="Checkpoint (default: v3, or POLY_CHATTERBOX_MULTILINGUAL_VERSION).")
 
     p = sub.add_parser("convert", help="Voice conversion: re-voice a recording with another voice.")
@@ -126,6 +130,31 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--description")
     pr = vs.add_parser("remove", help="Delete a saved cloned voice.")
     pr.add_argument("voice_id")
+
+    p = sub.add_parser("prompts", help="List, save and remove saved prompts.")
+    ps = p.add_subparsers(dest="prompts_command", required=True, metavar="ACTION")
+    pl = ps.add_parser("list", help="List saved prompts.")
+    pl.add_argument("--json", action="store_true")
+    pw = ps.add_parser("show", help="Print a saved prompt.")
+    pw.add_argument("prompt_id")
+    pw.add_argument("--json", action="store_true", help="Print everything as JSON instead of just the text.")
+    pa = ps.add_parser("save", help="Save a prompt (same name: replaces it).")
+    pa.add_argument("name")
+    pa.add_argument("text", nargs="?", help="Prompt text ('-' or omitted: read stdin).")
+    pa.add_argument("--text-file", help="Read the text from a file.")
+    pa.add_argument("--mode", choices=TTS_MODELS, help="Model to speak it with.")
+    pa.add_argument("-l", "--language", help="Language (multilingual).")
+    pa.add_argument("--model-version", choices=MULTILINGUAL_VERSIONS, help="Multilingual checkpoint.")
+    pa.add_argument("--voice", help="Library voice id.")
+    ga = pa.add_argument_group("generation options", "Saved with the prompt; unset options use the model defaults.")
+    for name, opt in GENERATION_OPTIONS.items():
+        flag = f"--{name.replace('_', '-')}"
+        if opt["type"] == "bool":
+            ga.add_argument(flag, action=argparse.BooleanOptionalAction)
+        else:
+            ga.add_argument(flag, type=float if opt["type"] == "float" else int, metavar=name.upper())
+    pr = ps.add_parser("remove", help="Delete a saved prompt.")
+    pr.add_argument("prompt_id")
 
     p = sub.add_parser("watermark", help="Check audio for the Perth watermark Chatterbox embeds.")
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
@@ -172,6 +201,8 @@ def run(args) -> int:
         return 0
     if cmd == "voices":
         return _voices(args, client)
+    if cmd == "prompts":
+        return _prompts(args, client)
     if cmd == "watermark":
         result = client.watermark(args.audio)
         if args.json:
@@ -184,17 +215,55 @@ def run(args) -> int:
         _write_output(args, wav, meta)
         return 0
 
-    text = _read_text(args)
     gen = _generation(args)
+    saved = client.prompt(args.prompt) if args.prompt else {}
+    if saved and not (args.text or args.text_file):
+        text = saved["text"]
+    else:
+        text = _read_text(args)
+    if saved:
+        gen = {**saved.get("generation", {}), **(gen or {})} or None
+        if not args.ref_audio and not args.voice:
+            args.voice = saved.get("voice_id")
     if cmd == "original":
         wav, meta = client.original(text, args.ref_audio, args.voice, gen)
     elif cmd in ("turbo", "nano"):
         wav, meta = client.turbo(text, args.ref_audio, args.voice, gen, nano=cmd == "nano")
     elif cmd == "multilingual":
-        wav, meta = client.multilingual(text, args.language, args.ref_audio, args.voice, args.model_version, gen)
+        language = args.language or saved.get("language")
+        if not language:
+            raise ValueError("A language is required: use -l, or a saved prompt that has one.")
+        wav, meta = client.multilingual(text, language, args.ref_audio, args.voice,
+                                        args.model_version or saved.get("version"), gen)
     else:  # pragma: no cover - argparse enforces the choices
         raise SystemExit(f"unknown command {cmd}")
     _write_output(args, wav, meta)
+    return 0
+
+
+def _prompts(args, client) -> int:
+    cmd = args.prompts_command
+    if cmd == "list":
+        prompts = client.prompts()
+        if args.json:
+            print(json.dumps(prompts, indent=2, ensure_ascii=False))
+        else:
+            print(f"{'ID':<24} {'MODE':<13} {'VOICE':<16} TEXT")
+            for p in prompts:
+                preview = " ".join(p["text"].split())
+                ellipsis = "…" if len(preview) > 50 else ""
+                print(f"{p['id']:<24} {p['mode'] or '-':<13} {p['voice_id'] or '-':<16} {preview[:50]}{ellipsis}")
+            print(f"\n{len(prompts)} prompts", file=sys.stderr)
+    elif cmd == "show":
+        prompt = client.prompt(args.prompt_id)
+        print(json.dumps(prompt, indent=2, ensure_ascii=False) if args.json else prompt["text"])
+    elif cmd == "save":
+        prompt = client.save_prompt(args.name, _read_text(args), args.mode, args.language, args.model_version,
+                                    args.voice, _generation(args))
+        print(prompt["id"])
+    elif cmd == "remove":
+        client.remove_prompt(args.prompt_id)
+        print(f"removed {args.prompt_id}", file=sys.stderr)
     return 0
 
 

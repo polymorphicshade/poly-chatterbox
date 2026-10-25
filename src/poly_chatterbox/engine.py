@@ -14,11 +14,12 @@ import numpy as np
 
 from . import audio as A
 from .audio import Audio
-from .backends import (MULTILINGUAL, MULTILINGUAL_VERSIONS, NANO, ORIGINAL, TURBO, Backend, BackendError,
-                       GenerationParams, create_backend)
+from .backends import (GENERATION_OPTIONS, MULTILINGUAL, MULTILINGUAL_VERSIONS, NANO, ORIGINAL, TTS_MODELS, TURBO, Backend,
+                       BackendError, GenerationParams, create_backend)
 from .config import Settings, get_settings
 from .languages import LANGUAGES, SAMPLES, normalize_language
 from .library import DEFAULT_VOICE, Voice, VoiceLibrary
+from .prompts import Prompt, PromptStore
 from .text import parse_markup
 
 MODEL_LABELS = {ORIGINAL: "Chatterbox", TURBO: "Chatterbox-Turbo", NANO: "Chatterbox-Nano", MULTILINGUAL: "Chatterbox Multilingual"}
@@ -56,6 +57,7 @@ class Engine:
         self.settings = settings or get_settings()
         self.backend = backend or create_backend(self.settings)
         self.library = VoiceLibrary(self.settings.voices_dir)
+        self.prompts = PromptStore(self.settings.prompts_dir)
         self._sample_lock = threading.Lock()
 
     # ================================================================ core features
@@ -107,6 +109,27 @@ class Engine:
 
     def remove_voice(self, voice_id: str) -> None:
         self.library.remove(voice_id)
+
+    def save_prompt(self, name: str, text: str, mode: Optional[str] = None, language: Optional[str] = None,
+                    version: Optional[str] = None, voice_id: Optional[str] = None,
+                    generation: Optional[dict[str, Any]] = None) -> tuple[Prompt, bool]:
+        """Save a prompt for reuse (replacing one with the same name). Returns it and whether it replaced one."""
+        if not name or not name.strip():
+            raise ValueError("Prompt name is required.")
+        if not text or not text.strip():
+            raise ValueError("Prompt text is required.")
+        if mode and mode not in TTS_MODELS:
+            raise ValueError(f"Unknown mode {mode!r}: use {', '.join(TTS_MODELS)}.")
+        if version and version not in MULTILINGUAL_VERSIONS:
+            raise ValueError(f"Unknown multilingual version {version!r}: use {' or '.join(MULTILINGUAL_VERSIONS)}.")
+        if unknown := [k for k in (generation or {}) if k not in GENERATION_OPTIONS]:
+            raise ValueError(f"Unknown generation option(s): {', '.join(unknown)}.")
+        if voice_id:
+            voice_id = self.library.get(voice_id).id  # must exist
+        return self.prompts.save(Prompt(
+            id="", name=name.strip(), text=text, mode=mode or None,
+            language=normalize_language(language) if language else None, version=version or None,
+            voice_id=voice_id or None, generation={k: v for k, v in (generation or {}).items() if v is not None}))
 
     def detect_watermark(self, audio: Audio) -> dict[str, Any]:
         """Look for the Perth watermark that Chatterbox embeds in everything it generates."""

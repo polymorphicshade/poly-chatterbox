@@ -65,3 +65,29 @@ def test_voices_table_and_watermark(engine, ref_wav, capsys):
     assert code == 0 and "sample_zh" in stdout and "Chinese" in stdout
     code, stdout, _ = run(capsys, "watermark", str(ref_wav))
     assert code == 0 and "no watermark" in stdout
+
+
+def test_prompts_save_list_show_and_use(engine, tmp_path, capsys):
+    code, stdout, err = run(capsys, "prompts", "save", "French Hello", "Bonjour [settings cfg_weight=0]à tous[/settings]",
+                            "--mode", "multilingual", "-l", "fr", "--voice", "podcast", "--temperature", "0.6")
+    assert code == 0 and stdout.strip() == "french_hello", err
+    code, stdout, _ = run(capsys, "prompts", "list")
+    assert "french_hello" in stdout and "multilingual" in stdout and "podcast" in stdout
+    code, stdout, _ = run(capsys, "prompts", "show", "french_hello")
+    assert stdout.strip() == "Bonjour [settings cfg_weight=0]à tous[/settings]"
+    out = tmp_path / "p.wav"
+    code, stdout, err = run(capsys, "multilingual", "--prompt", "french_hello", "-o", str(out), "--json")
+    assert code == 0, err
+    meta = json.loads(stdout)
+    assert meta["language"] == "fr" and meta["voice"] == "podcast"
+    call = [c for c in engine.backend.calls if c[0] == "synthesize"][-1][1]
+    assert call["params"].temperature == 0.6
+    # Explicit arguments win over the prompt.
+    code, stdout, _ = run(capsys, "multilingual", "Hola", "--prompt", "french_hello", "-l", "es", "--voice", "default",
+                          "--temperature", "0.9", "-o", str(out), "--json")
+    assert json.loads(stdout)["language"] == "es" and json.loads(stdout)["voice"] == "default"
+    assert [c for c in engine.backend.calls if c[0] == "synthesize"][-1][1]["params"].temperature == 0.9
+    code, _, _ = run(capsys, "prompts", "remove", "french_hello")
+    assert code == 0
+    code, _, err = run(capsys, "turbo", "--prompt", "french_hello", "-o", str(out))
+    assert code == 2 and "Unknown prompt" in err

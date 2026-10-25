@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,3 +48,17 @@ class GenerationOptions(BaseModel):
 
 def params(opts: Optional[GenerationOptions]) -> GenerationParams:
     return opts.to_params() if opts else GenerationParams()
+
+
+class PromptRequest(BaseModel):
+    """A prompt to save. Saving under an existing name replaces that prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=100)
+    text: str = Field(..., min_length=1, max_length=20000, description="The text, including any [pause]/[settings]/[voice] markup.")
+    mode: Optional[Literal["original", "turbo", "nano", "multilingual"]] = Field(None, description="Model to speak it with.")
+    language: Optional[str] = Field(None, description="Language code or name (multilingual).")
+    version: Optional[Literal["v2", "v3"]] = Field(None, description="Multilingual checkpoint.")
+    voice_id: Optional[str] = Field(None, description="Library voice to speak it with (see GET /api/voices).")
+    generation: Optional[GenerationOptions] = None

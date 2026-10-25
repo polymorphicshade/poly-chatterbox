@@ -179,3 +179,5 @@ textarea[readonly] { opacity: .7; }
 .markup-tools .sep { flex: 0 0 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
 .btn.small { padding: 3px 10px; font-size: 12px; }
 .settings-preview code { word-break: break-all; }
+.prompt-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.prompt-tools select { width: auto; flex: 1 1 180px; max-width: 320px; }

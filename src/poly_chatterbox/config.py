@@ -27,9 +27,16 @@ class Settings:
     # Long text is split at sentence boundaries into chunks of at most this many characters.
     max_chunk_chars: int = field(default_factory=lambda: int(_env("MAX_CHUNK_CHARS", "300")))
 
+    # Where saved prompts live (default: <data dir>/prompts). Lets a deployment mount them on their own volume.
+    prompts_path: str = field(default_factory=lambda: _env("PROMPTS_DIR", ""))
+
     @property
     def voices_dir(self) -> Path:
         return self.data_dir / "voices"
+
+    @property
+    def prompts_dir(self) -> Path:
+        return Path(self.prompts_path) if self.prompts_path else self.data_dir / "prompts"
 
     @property
     def samples_dir(self) -> Path:

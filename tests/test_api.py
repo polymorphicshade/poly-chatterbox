@@ -132,4 +132,43 @@ def test_markup_spans_via_api(client):
 
 def test_web_ui_has_wrap_buttons(client):
     js = client.get("/static/app.js").text
-    assert "wrap-settings" in js and "wrap-voice" in js
+    assert "wrap-settings" in js and "wrap-voice" in js and "save-prompt" in js
+
+
+def test_prompts_crud(client):
+    assert client.get("/api/prompts").json() == []
+    body = {"name": "Dramatic Intro", "text": "Hi [settings exaggeration=0.9]there[/settings]", "mode": "multilingual",
+            "language": "French", "version": "v3", "voice_id": "podcast",
+            "generation": {"cfg_weight": 0.3, "seed": 5}}
+    res = client.post("/api/prompts", json=body)
+    assert res.status_code == 201
+    saved = res.json()
+    assert saved["id"] == "dramatic_intro" and saved["language"] == "fr" and saved["generation"] == {"cfg_weight": 0.3, "seed": 5}
+    assert client.get("/api/prompts/dramatic_intro").json()["text"] == body["text"]
+    # Same name: replaced, keeping the creation time.
+    res = client.post("/api/prompts", json={**body, "text": "New text"})
+    assert res.status_code == 200 and res.json()["text"] == "New text" and res.json()["created"] == saved["created"]
+    assert [p["id"] for p in client.get("/api/prompts").json()] == ["dramatic_intro"]
+    assert client.delete("/api/prompts/dramatic_intro").status_code == 204
+    assert client.delete("/api/prompts/dramatic_intro").status_code == 404
+    assert client.get("/api/prompts/dramatic_intro").status_code == 404
+
+
+def test_prompts_validation(client):
+    ok = {"name": "x", "text": "hi"}
+    assert client.post("/api/prompts", json={**ok, "mode": "bogus"}).status_code == 422
+    assert client.post("/api/prompts", json={**ok, "generation": {"speed": 2}}).status_code == 422
+    assert client.post("/api/prompts", json={**ok, "voice_id": "ghost"}).status_code == 404
+    assert client.post("/api/prompts", json={**ok, "language": "Klingon"}).status_code == 400
+    assert client.post("/api/prompts", json={"name": "  ", "text": "hi"}).status_code == 400
+    assert client.post("/api/prompts", json={"name": "x", "text": "   "}).status_code == 400
+
+
+def test_prompt_dir_is_configurable(settings, tmp_path):
+    from poly_chatterbox.backends.mock import MockBackend
+    from poly_chatterbox.engine import Engine
+
+    settings.prompts_path = str(tmp_path / "elsewhere")
+    engine = Engine(settings, MockBackend())
+    engine.save_prompt("Mounted", "hi")
+    assert (tmp_path / "elsewhere" / "mounted.json").is_file()

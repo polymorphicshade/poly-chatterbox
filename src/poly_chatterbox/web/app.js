@@ -26,6 +26,7 @@ const sourcesFor = (mode) => (mode === "multilingual" ? ["sample", "builtin", "l
 const app = {
   info: null,
   voices: [],
+  prompts: [],      // saved prompts (GET /api/prompts)
   workspaces: [],   // persisted state objects
   runtime: {},      // id -> { el, files: {ref, source}, results, busy, recorder, recSlot }
   activeId: null,
@@ -50,7 +51,7 @@ function newWorkspace(name) {
   return {
     id: uid(), name: name || `Workspace ${app.workspaces.length + 1}`, mode: "turbo",
     text: SAMPLE_TEXTS.turbo, language: "fr", version: "",
-    voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", saveName: "",
+    voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", promptId: "", saveName: "",
     voiceFilter: { q: "", kind: "" }, gen: {},
   };
 }
@@ -214,6 +215,15 @@ function textField(ws, model) {
   const tags = model === "turbo" || model === "nano";
   const max = app.info?.max_chunk_chars ?? 300;
   return `<div class="field"><label for="${ws.id}-text">Text</label>
+    <div class="prompt-tools">
+      <select data-k="promptId" aria-label="Saved prompts">
+        <option value="">${app.prompts.length ? `Saved prompts (${app.prompts.length})…` : "No saved prompts yet"}</option>
+        ${app.prompts.map((p) => `<option value="${esc(p.id)}" ${p.id === ws.promptId ? "selected" : ""}>${esc(p.name)}${p.mode ? " · " + esc(p.mode) : ""}</option>`).join("")}
+      </select>
+      <button type="button" class="btn small" data-action="load-prompt" title="Replace this workspace's text, mode, voice and settings with the saved prompt">Load</button>
+      <button type="button" class="btn small" data-action="save-prompt" title="Save the text, mode, language, voice and changed settings as a prompt">Save…</button>
+      ${ws.promptId ? `<button type="button" class="link danger" data-action="delete-prompt">Delete</button>` : ""}
+    </div>
     <textarea id="${ws.id}-text" class="main-text" data-k="text" placeholder="What should be said?">${esc(ws.text)}</textarea>
     ${tags ? `<div class="chips" aria-label="Insert a paralinguistic tag">${(app.info?.event_tags || []).map((t) =>
       `<button type="button" class="chip tag" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
@@ -478,6 +488,9 @@ function bindForm(ws, form) {
     showError(ws, "");
     wrapSelection(ws, form, `[voice: ${id}]`, "[/voice]");
   });
+  form.querySelector("[data-action='load-prompt']")?.addEventListener("click", () => loadPrompt(ws));
+  form.querySelector("[data-action='save-prompt']")?.addEventListener("click", () => savePrompt(ws));
+  form.querySelector("[data-action='delete-prompt']")?.addEventListener("click", () => deletePrompt(ws));
   form.querySelector("[data-action='save-voice']")?.addEventListener("click", () => saveVoice(ws));
   form.querySelector("[data-action='delete-voice']")?.addEventListener("click", () => deleteVoice(ws));
   form.querySelector("[data-action='sample-text']")?.addEventListener("click", () => {
@@ -609,6 +622,79 @@ async function deleteVoice(ws) {
   try {
     await api(`/api/voices/${encodeURIComponent(voice.id)}`, { method: "DELETE" });
     await refreshVoices();
+  } catch (e) {
+    showError(ws, e.message);
+  }
+}
+
+// ------------------------------------------------------------------ saved prompts
+
+async function refreshPrompts() {
+  app.prompts = await (await api("/api/prompts")).json();
+  for (const ws of app.workspaces) renderForm(ws);
+}
+
+// Which voice source the form is really using (a mode may not offer the stored one).
+function effectiveSource(ws) {
+  const sources = sourcesFor(ws.mode);
+  return sources.includes(ws.voiceSource) ? ws.voiceSource : sources[0];
+}
+
+async function savePrompt(ws) {
+  showError(ws, "");
+  if (!ws.text.trim()) return showError(ws, "There is no text to save.");
+  const current = app.prompts.find((p) => p.id === ws.promptId);
+  const name = (window.prompt("Name for this prompt (an existing name is replaced):", current?.name || "") || "").trim();
+  if (!name) return;
+  if (app.prompts.some((p) => p.name.toLowerCase() === name.toLowerCase()) && !confirm(`Replace the saved prompt "${name}"?`)) return;
+  const source = effectiveSource(ws);
+  const body = { name, text: ws.text, mode: modeOf(ws).model };
+  if (modeOf(ws).model === "multilingual") {
+    body.language = ws.language;
+    if (ws.version) body.version = ws.version;
+  }
+  if (source === "library") body.voice_id = ws.voiceId;
+  if (source === "builtin") body.voice_id = "default";
+  const generation = cleanGen(ws.gen[ws.mode]);
+  if (generation) body.generation = generation;
+  try {
+    const saved = await (await api("/api/prompts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    ws.promptId = saved.id;
+    save();
+    await refreshPrompts();
+    if (source === "upload") showError(ws, "Saved. An uploaded clip isn't stored with a prompt: save it to the voice library to include the voice.");
+  } catch (e) {
+    showError(ws, e.message);
+  }
+}
+
+function loadPrompt(ws) {
+  const p = app.prompts.find((x) => x.id === ws.promptId);
+  if (!p) return showError(ws, "Choose a saved prompt to load first.");
+  if (p.mode && MODES.some((m) => m.id === p.mode)) ws.mode = p.mode;
+  ws.text = p.text;
+  if (p.language) ws.language = p.language;
+  ws.version = p.version || "";
+  if (p.voice_id === "default") ws.voiceSource = "builtin";
+  else if (p.voice_id) { ws.voiceSource = "library"; ws.voiceId = p.voice_id; }
+  else if (ws.mode === "multilingual") ws.voiceSource = "sample";
+  ws.gen[ws.mode] = { ...(p.generation || {}) };
+  save();
+  renderModes(ws);
+  renderForm(ws);
+  if (p.voice_id && p.voice_id !== "default" && !app.voices.some((v) => v.id === p.voice_id)) {
+    showError(ws, `Loaded, but the voice "${p.voice_id}" is no longer in the library.`);
+  }
+}
+
+async function deletePrompt(ws) {
+  const p = app.prompts.find((x) => x.id === ws.promptId);
+  if (!p || !confirm(`Delete the saved prompt "${p.name}"?`)) return;
+  try {
+    await api(`/api/prompts/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+    for (const w of app.workspaces) if (w.promptId === p.id) w.promptId = "";
+    save();
+    await refreshPrompts();
   } catch (e) {
     showError(ws, e.message);
   }
@@ -753,6 +839,7 @@ async function boot() {
   try {
     app.info = await (await api("/api/info")).json();
     await loadVoices();
+    app.prompts = await (await api("/api/prompts")).json().catch(() => []);
     const b = app.info.backend;
     status.textContent = `${b.backend}${b.gpu ? " · " + b.gpu : b.device ? " · " + b.device : ""} · ${app.voices.length} voices`;
     status.className = "status ok";

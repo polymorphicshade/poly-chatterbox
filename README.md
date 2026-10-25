@@ -57,10 +57,10 @@ The UI is then at `https://<host>:8443`. Browsers only allow microphone recordin
 
 - **Certificate:** a self-signed certificate is generated into `./certs` on first boot, so the browser warns once until you accept it. Every address you type in the browser must be in `TLS_SAN`, e.g. `IP:192.168.1.99`. After changing it, delete `./certs` and restart to mint a new one. To use a CA-issued certificate, put `fullchain.pem` and `privkey.pem` in `./certs`.
 - **Ports:** in the HTTPS stack, 8000 is the app's plain HTTP listener and is published on `127.0.0.1` only. `https://<host>:8000` fails with `SSL_ERROR_RX_RECORD_TOO_LONG` because nothing there speaks TLS. Change either port with `HTTPS_PORT` and `PORT` in `.env`.
-- **Storage:** weights download on first use into the `models` volume. Saved voices and downloaded demo voices go to the `library` volume. Both stacks share these volumes.
+- **Storage:** weights download on first use into the `models` volume. Saved voices and downloaded demo voices go to the `library` volume, and saved prompts to the `prompts` volume. Both stacks share these volumes. To keep prompts in a host folder instead (to edit, back up or share them), set `PROMPTS_DIR=./prompts` in `.env`.
 - **Settings:** `POLY_CHATTERBOX_SERVE_ARGS` passes extra `poly-chatterbox serve` flags, for example `--preload` (all models) or `--preload turbo,multilingual`. Any other `POLY_CHATTERBOX_*` variable (see [Configuration](#configuration-environment-variables)) can be added under `environment:` in the compose file. `HF_TOKEN` speeds up downloads.
 
-The image runs on its own too: `docker build -t poly-chatterbox .`, then `docker run --gpus all -p 8000:8000 -v chatterbox-cache:/data/cache -v chatterbox-library:/data/library poly-chatterbox`.
+The image runs on its own too: `docker build -t poly-chatterbox .`, then `docker run --gpus all -p 8000:8000 -v chatterbox-cache:/data/cache -v chatterbox-library:/data/library -v chatterbox-prompts:/data/prompts poly-chatterbox`.
 
 ## Web UI
 
@@ -97,6 +97,19 @@ Tips from upstream:
 * **Your clones**: save one with `poly-chatterbox voices add`, `POST /api/voices` or the UI. They are stored in `data/voices/`.
 
 Any voice works with any model and as a voice conversion target. `poly-chatterbox voices list` lists every voice.
+
+## Saved prompts
+
+A prompt is a name, the text (with any markup), and optionally the mode, language, multilingual version, library voice and generation options to speak it with. They are stored as JSON in `data/prompts/` (the `prompts` volume in Docker). Saving under an existing name replaces that prompt.
+
+* **Web UI:** above the text box, pick a prompt and click **Load**, or click **Save…** to store the current text, mode, language, voice and the generation options you've changed. A voice from an uploaded clip isn't stored: save the clip to the voice library first.
+* **API:** `GET /api/prompts`, `GET /api/prompts/{id}`, `POST /api/prompts` (JSON: `name`, `text`, and optional `mode`, `language`, `version`, `voice_id`, `generation`; 201 when created, 200 when replaced) and `DELETE /api/prompts/{id}`.
+* **CLI:** `poly-chatterbox prompts list|show|save|remove`, and `--prompt ID` on `original`, `turbo`, `nano` and `multilingual` to speak a saved prompt. Its text, voice, language and generation options are the defaults; anything you pass explicitly wins.
+
+```sh
+poly-chatterbox prompts save "Dramatic intro" "Welcome. [settings exaggeration=0.9]It begins tonight.[/settings]" --mode original --voice podcast
+poly-chatterbox original --prompt dramatic_intro -o intro.wav
+```
 
 ## CLI
 
@@ -163,6 +176,7 @@ Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com
 | `POLY_CHATTERBOX_MULTILINGUAL_VERSION` | `v3` (`v2` for the previous checkpoint) |
 | `POLY_CHATTERBOX_MAX_LOADED_MODELS` | `3` (least recently used model is unloaded first; 3 fits a 16 GB GPU) |
 | `POLY_CHATTERBOX_DATA_DIR` | `./data` |
+| `POLY_CHATTERBOX_PROMPTS_DIR` | `<data dir>/prompts` (`/data/prompts` in Docker) |
 | `POLY_CHATTERBOX_MIN_REF_SECONDS` / `_MAX_REF_SECONDS` | `5` / `60` |
 | `POLY_CHATTERBOX_MAX_CHUNK_CHARS` | `300` |
 | `HF_TOKEN` | unset (optional Hugging Face token) |

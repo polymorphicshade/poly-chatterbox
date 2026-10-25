@@ -23,7 +23,7 @@ from ..backends import GENERATION_OPTIONS, MULTILINGUAL_VERSIONS, BackendError
 from ..engine import MODEL_LABELS, Engine, SynthesisResult, get_engine
 from ..languages import LANGUAGES, SAMPLES
 from ..text import EVENT_TAGS
-from .schemas import GenerationOptions, params
+from .schemas import GenerationOptions, PromptRequest, params
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -171,6 +171,30 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
     @app.delete("/api/voices/{voice_id}", tags=["voices"], status_code=204)
     def delete_voice(voice_id: str):
         eng().remove_voice(voice_id)
+        return Response(status_code=204)
+
+    # ------------------------------------------------------------------ saved prompts
+
+    @app.get("/api/prompts", tags=["prompts"])
+    def list_prompts():
+        return [p.to_dict() for p in eng().prompts.list()]
+
+    @app.get("/api/prompts/{prompt_id}", tags=["prompts"])
+    def get_prompt(prompt_id: str):
+        return eng().prompts.get(prompt_id).to_dict()
+
+    @app.post("/api/prompts", tags=["prompts"], status_code=201)
+    def save_prompt(req: PromptRequest, response: Response):
+        """Save a prompt (text, mode, language, voice and generation options). Same name: replaces it (200)."""
+        generation = req.generation.model_dump(exclude_none=True) if req.generation else None
+        prompt, replaced = eng().save_prompt(req.name, req.text, req.mode, req.language, req.version, req.voice_id, generation)
+        if replaced:
+            response.status_code = 200
+        return prompt.to_dict()
+
+    @app.delete("/api/prompts/{prompt_id}", tags=["prompts"], status_code=204)
+    def delete_prompt(prompt_id: str):
+        eng().prompts.remove(prompt_id)
         return Response(status_code=204)
 
     # ------------------------------------------------------------------ core features

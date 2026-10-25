@@ -57,6 +57,18 @@ class LocalClient:
     def remove_voice(self, voice_id) -> None:
         self.engine.remove_voice(voice_id)
 
+    def prompts(self) -> list[dict]:
+        return [p.to_dict() for p in self.engine.prompts.list()]
+
+    def prompt(self, prompt_id) -> dict:
+        return self.engine.prompts.get(prompt_id).to_dict()
+
+    def save_prompt(self, name, text, mode=None, language=None, version=None, voice_id=None, generation=None) -> dict:
+        return self.engine.save_prompt(name, text, mode, language, version, voice_id, generation)[0].to_dict()
+
+    def remove_prompt(self, prompt_id) -> None:
+        self.engine.prompts.remove(prompt_id)
+
     def watermark(self, audio: Path) -> dict:
         return self.engine.detect_watermark(load_audio(audio))
 
@@ -128,6 +140,20 @@ class HttpClient:
 
     def remove_voice(self, voice_id) -> None:
         self._check(self.http.delete(f"/api/voices/{voice_id}"))
+
+    def prompts(self) -> list[dict]:
+        return self._check(self.http.get("/api/prompts")).json()
+
+    def prompt(self, prompt_id) -> dict:
+        return self._check(self.http.get(f"/api/prompts/{prompt_id}")).json()
+
+    def save_prompt(self, name, text, mode=None, language=None, version=None, voice_id=None, generation=None) -> dict:
+        body = {k: v for k, v in dict(name=name, text=text, mode=mode, language=language, version=version,
+                                      voice_id=voice_id, generation=generation).items() if v is not None}
+        return self._check(self.http.post("/api/prompts", json=body)).json()
+
+    def remove_prompt(self, prompt_id) -> None:
+        self._check(self.http.delete(f"/api/prompts/{prompt_id}"))
 
     def watermark(self, audio: Path) -> dict:
         return self._check(self.http.post("/api/watermark", files=self._files(audio=audio))).json()
