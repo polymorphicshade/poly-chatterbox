@@ -10,7 +10,7 @@ const MODES = [
   { id: "original", label: "Original", model: "original", hint: "The original Chatterbox (English, 500M), with creative control: raise exaggeration for drama and lower CFG / pace to slow it down." },
   { id: "vc", label: "Voice Conversion", hint: "Keep the words, timing and intonation of a recording but change the voice: upload or record speech, then pick the target voice." },
   { id: "watermark", label: "Watermark", hint: "Everything Chatterbox generates carries an imperceptible Perth watermark. Check whether a clip has one." },
-  { id: "whisper", label: "Whisper", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
+  { id: "whisper", label: "Transcribe", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
   { id: "speechtranslate", label: "Speech Translation", hint: "Translate a recording: it is transcribed, translated and spoken in another language, in the voice of your choice (or the original speaker's). For example English speech in, Japanese speech out in a cloned voice." },
   { id: "denoise", label: "Clean Audio", hint: "Remove background noise from a recording with an AI speech-enhancement model and keep the voice. Handy for a reference clip made in a noisy room: clean it, then use it to clone." },
   { id: "vocals", label: "Isolate Vocals", hint: "Extract the vocals or voices from a music track: an AI model separates them from the drums, bass and instruments. Download the vocals, or use them as a reference clip for cloning." },

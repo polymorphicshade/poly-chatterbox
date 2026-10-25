@@ -20,7 +20,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
 | Voice library (built-in, 24 demo voices, your saved clones) | voice picker in every mode | `GET/POST/DELETE /api/voices` | `poly-chatterbox voices` |
 | Perth watermark detection | Watermark | `POST /api/watermark` | `poly-chatterbox watermark` |
-| Speech to text with Whisper | Whisper | `POST /api/transcribe` | `poly-chatterbox transcribe` |
+| Speech to text with Whisper | Transcribe | `POST /api/transcribe` | `poly-chatterbox transcribe` |
 
 Multilingual languages: Arabic, Danish, German, Greek, English, Spanish, Finnish, French, Hebrew, Hindi, Italian, Japanese, Korean, Malay, Dutch, Norwegian, Polish, Portuguese, Russian, Swedish, Swahili, Turkish and Chinese.
 
@@ -289,7 +289,7 @@ Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com
 
 ## Whisper transcription
 
-The Whisper mode is a plain speech-to-text tool: upload or record audio, optionally pick the spoken language (otherwise it is detected), and copy the transcript. `POST /api/transcribe` (multipart `audio`, optional `language`) returns `{"text", "segments": [{"start", "end", "text"}], "language", "duration", "elapsed"}`, and `poly-chatterbox transcribe FILE [-l LANG] [--json]` does the same from the shell. The checkpoint (`openai/whisper-large-v3-turbo` by default, about 1.6 GB) is downloaded on first use and set with `POLY_CHATTERBOX_WHISPER_MODEL`; it stays loaded next to the TTS models without counting toward `MAX_LOADED_MODELS`.
+The Transcribe mode is a plain speech-to-text tool: upload or record audio, optionally pick the spoken language (otherwise it is detected), and copy the transcript. `POST /api/transcribe` (multipart `audio`, optional `language`) returns `{"text", "segments": [{"start", "end", "text"}], "language", "duration", "elapsed"}`, and `poly-chatterbox transcribe FILE [-l LANG] [--json]` does the same from the shell. The checkpoint (`openai/whisper-large-v3-turbo` by default, about 1.6 GB) is downloaded on first use and set with `POLY_CHATTERBOX_WHISPER_MODEL`; it stays loaded next to the TTS models without counting toward `MAX_LOADED_MODELS`.
 
 ## Translation
 
