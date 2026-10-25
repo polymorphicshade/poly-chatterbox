@@ -272,12 +272,13 @@ class ChatterboxBackend(Backend):
         import torch
 
         def load():
-            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            from transformers import AutoModelForSeq2SeqLM, NllbTokenizer
 
             name = self.settings.translation_model
             dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
             model = AutoModelForSeq2SeqLM.from_pretrained(name, dtype=dtype).to(self.device).eval()
-            return AutoTokenizer.from_pretrained(name), model
+            # NllbTokenizer directly: AutoTokenizer has no mapping for NLLB in transformers 5.2
+            return NllbTokenizer.from_pretrained(name), model
 
         out: list[str] = []
         with self._lock:
