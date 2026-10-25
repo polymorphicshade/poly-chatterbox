@@ -14,6 +14,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 
 | Background-noise removal for reference clips (AI speech enhancement) | Clean Audio, and "Remove background noise" on a reference clip | `POST /api/denoise`, `denoise` on `POST /api/voices` | `poly-chatterbox denoise`, `voices add --denoise` |
 | Translate a recording (speech in, translated speech out) | Speech Translation | `POST /api/translate/speech` | `poly-chatterbox translate-speech` |
+| Vocal isolation (extract voices from a music track) | Isolate Vocals | `POST /api/vocals` | `poly-chatterbox vocals` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
@@ -336,6 +337,22 @@ The model works at 16 kHz, so cleaned clips are 16 kHz mono with their original 
 poly-chatterbox denoise noisy_room.wav -o clean.wav
 poly-chatterbox voices add "Narrator" --ref-audio noisy_room.wav --denoise -l en
 curl -X POST localhost:8000/api/denoise -F audio=@noisy_room.wav -o clean.wav
+```
+
+## Isolating vocals from music
+
+The noise remover is built for speech against everyday noise and is unreliable against music. To pull a voice out of a song, or speech out from under a music bed, use *Isolate Vocals*: a Hybrid Demucs source-separation model (the one in torchaudio, trained on MUSDB18-HQ plus 150 extra songs, about 300 MB, downloaded on first use) splits the track and keeps the vocals, dropping the drums, bass and instruments.
+
+* **Web UI:** the *Isolate Vocals* mode. Download the result, or click *Use as reference clip* to clone from it.
+* **API:** `POST /api/vocals` (multipart `audio`) returns the vocals as `audio/wav`. Uploads are limited to 25 MB, so send long lossless tracks as FLAC or MP3.
+* **CLI:** `poly-chatterbox vocals song.mp3 -o vocals.wav`.
+
+The result is 44.1 kHz mono with the input's loudness. Backing vocals and reverb can bleed into it in either direction, and it keeps whoever is singing or speaking, so for a reference clip choose a part with a single voice and, if some noise is left, run it through *Clean Audio* afterwards. Long tracks are processed in 10 s windows and cross-faded; expect them to be slow on CPU.
+
+```sh
+poly-chatterbox vocals song.mp3 -o vocals.wav
+poly-chatterbox voices add "Singer" --ref-audio vocals.wav -l en --denoise
+curl -X POST localhost:8000/api/vocals -F audio=@song.mp3 -o vocals.wav
 ```
 
 ## Configuration (environment variables)

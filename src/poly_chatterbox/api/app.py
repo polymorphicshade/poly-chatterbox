@@ -181,6 +181,18 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
                                          voice_id or None, keep_voice, version or None, params(gen), preset or None)
         return _audio_response(result)
 
+    @app.post("/api/vocals", tags=["voices"], response_class=Response, responses=WAV)
+    async def isolate_vocals(audio: UploadFile = File(..., description="Music track or any recording with a voice (WAV/FLAC/OGG/MP3).")):
+        """Isolate the vocals of a song with an AI source-separation model (Hybrid Demucs): no drums, bass or instruments.
+
+        Works for singing and for speech over music. The output is 44.1 kHz WAV. Use it to get a clean reference clip
+        from a track, then clone from the result.
+        """
+        clip = await _read_upload(audio, "Audio")
+        if clip is None:
+            raise HTTPException(400, "audio is empty.")
+        return _audio_response(await run_in_threadpool(eng().isolate_vocals, clip))
+
     @app.post("/api/watermark", tags=["meta"])
     async def watermark(audio: UploadFile = File(..., description="Audio to check (WAV/FLAC/OGG/MP3).")):
         """Detect the Perth watermark that Chatterbox embeds in all generated audio."""

@@ -138,6 +138,22 @@ class Engine:
         return SynthesisResult(audio=out, sample_rate=out_sr, mode="denoise", elapsed=time.perf_counter() - t0,
                                details={"model": self.settings.denoise_model, "source_duration": round(len(wav) / sr, 3)})
 
+    def isolate_vocals(self, audio: Audio) -> SynthesisResult:
+        """Extract the vocals (singing or speech) from a music track, leaving out the instruments and drums.
+
+        The model works at 44.1 kHz, so that is the result's sample rate; its loudness matches the input's.
+        """
+        wav, sr = audio
+        if not wav.size or float(np.max(np.abs(wav))) < 1e-3:
+            raise ValueError("The audio is silent: there are no vocals to extract.")
+        t0 = time.perf_counter()
+        out, out_sr = self.backend.isolate_vocals(audio)
+        peak_in, peak_out = float(np.max(np.abs(wav))), float(np.max(np.abs(out))) if out.size else 0.0
+        if peak_out > 1e-6:
+            out = (out * min(peak_in / peak_out, 8.0)).astype(np.float32)  # back to the input level
+        return SynthesisResult(audio=out, sample_rate=out_sr, mode="vocals", elapsed=time.perf_counter() - t0,
+                               details={"model": "Hybrid Demucs", "source_duration": round(len(wav) / sr, 3)})
+
     def save_voice(self, name: str, ref_audio: Audio, language: Optional[str] = None,
                    description: Optional[str] = None, denoise: bool = False) -> Voice:
         """Save a cloned voice. ``denoise``: remove background noise from the clip first."""

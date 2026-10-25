@@ -67,6 +67,11 @@ class MockBackend(Backend):
         wav, sr = audio
         return A.process_windows(wav, sr, lambda chunk: chunk * 0.5), sr  # "cleaner" = quieter, so tests can tell
 
+    def isolate_vocals(self, audio):
+        self.calls.append(("isolate_vocals", {}))
+        wav, sr = audio
+        return A.process_windows(wav, sr, lambda chunk: chunk * 0.25), sr  # quieter, so tests can tell
+
     def detect_watermark(self, audio):
         self.calls.append(("detect_watermark", {}))
         return 0.0

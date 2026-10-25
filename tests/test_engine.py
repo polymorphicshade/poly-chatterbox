@@ -307,3 +307,14 @@ def test_translate_speech_detects_the_language(engine, monkeypatch):
     monkeypatch.setattr(engine.backend, "transcribe", lambda audio, language=None: {**real(audio, language), "language": "de"})
     res = engine.translate_speech(source, "fr")
     assert res.details["source_language"] == "de" and last_call(engine, "translate")["source"] == "de"
+
+
+def test_isolate_vocals(engine):
+    wav = load_audio(make_wav(3))
+    res = engine.isolate_vocals(wav)
+    assert res.mode == "vocals" and len(res.audio) == len(wav[0])
+    # The mock quarters the level; the engine restores the loudness of the input.
+    assert np.max(np.abs(res.audio)) == pytest.approx(np.max(np.abs(wav[0])), rel=1e-3)
+    assert engine.backend.calls[-1][0] == "isolate_vocals"
+    with pytest.raises(ValueError, match="silent"):
+        engine.isolate_vocals((np.zeros(16000, dtype=np.float32), 16000))

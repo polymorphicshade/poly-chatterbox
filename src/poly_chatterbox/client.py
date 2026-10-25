@@ -77,6 +77,9 @@ class LocalClient:
     def denoise(self, audio: Path) -> Result:
         return self._out(self.engine.denoise(load_audio(audio)))
 
+    def isolate_vocals(self, audio: Path) -> Result:
+        return self._out(self.engine.isolate_vocals(load_audio(audio)))
+
     def remove_voice(self, voice_id) -> None:
         self.engine.remove_voice(voice_id)
 
@@ -199,6 +202,9 @@ class HttpClient:
 
     def denoise(self, audio: Path) -> Result:
         return self._audio(self.http.post("/api/denoise", files=self._files(audio=audio)))
+
+    def isolate_vocals(self, audio: Path) -> Result:
+        return self._audio(self.http.post("/api/vocals", files=self._files(audio=audio)))
 
     def remove_voice(self, voice_id) -> None:
         self._check(self.http.delete(f"/api/voices/{voice_id}"))

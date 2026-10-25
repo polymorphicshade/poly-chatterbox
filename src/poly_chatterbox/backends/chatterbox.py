@@ -36,6 +36,7 @@ NLLB_CODES = {
 }
 
 DENOISER = "denoiser"
+SEPARATOR = "separator"
 DENOISE_RATE = 16000  # the enhancement model works at 16 kHz
 MAX_CACHED_VOICES = 32
 
@@ -319,6 +320,34 @@ class ChatterboxBackend(Backend):
 
             out = A.process_windows(np.ascontiguousarray(wav, dtype=np.float32), DENOISE_RATE, run)
         return out.astype(np.float32), DENOISE_RATE
+
+    def isolate_vocals(self, audio):
+        import librosa
+        import torch
+        import torchaudio
+
+        def load():
+            # Hybrid Demucs trained on MUSDB18-HQ plus 150 extra songs; torchaudio downloads the weights (~300 MB).
+            bundle = torchaudio.pipelines.HDEMUCS_HIGH_MUSDB_PLUS
+            model = bundle.get_model().to(self.device).eval()
+            return model, bundle.sample_rate, model.sources.index("vocals")
+
+        wav, sr = audio
+        with self._lock:
+            model, rate, vocals = self.aux_model(SEPARATOR, load)
+            if sr != rate:
+                wav = librosa.resample(wav, orig_sr=sr, target_sr=rate)
+            wav = np.ascontiguousarray(wav, dtype=np.float32)
+            mean, std = float(wav.mean()), float(wav.std()) or 1.0  # the model expects normalised input
+
+            def run(chunk: np.ndarray) -> np.ndarray:
+                x = torch.from_numpy((chunk - mean) / std).float().to(self.device)
+                with torch.inference_mode():
+                    out = model(x.expand(1, 2, -1))  # mono in, as both channels
+                return out[0, vocals].mean(dim=0).cpu().numpy() * std + mean
+
+            out = A.process_windows(wav, rate, run, window_s=10.0, overlap_s=1.0)
+        return out.astype(np.float32), int(rate)
 
     def detect_watermark(self, audio):
         import perth

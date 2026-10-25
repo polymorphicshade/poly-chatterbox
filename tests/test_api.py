@@ -281,3 +281,16 @@ def test_translate_speech(client):
 def test_web_ui_has_speech_translation(client):
     js = client.get("/static/app.js").text
     assert "speechtranslate" in js and "/api/translate/speech" in js
+
+
+def test_isolate_vocals(client):
+    res = client.post("/api/vocals", files={"audio": ("song.wav", make_wav(3), "audio/wav")})
+    assert_wav_any(res)
+    assert meta(res)["mode"] == "vocals" and meta(res)["duration"] == pytest.approx(3.0, abs=0.01)
+    assert client.post("/api/vocals").status_code == 422
+    assert client.post("/api/vocals", files={"audio": ("a.wav", b"junk", "audio/wav")}).status_code == 400
+
+
+def test_web_ui_has_vocals(client):
+    js = client.get("/static/app.js").text
+    assert "/api/vocals" in js and "Isolate Vocals" in js

@@ -140,6 +140,10 @@ class Backend(ABC):
         """Speech enhancement: remove background noise from a recording and keep the voice."""
 
     @abstractmethod
+    def isolate_vocals(self, audio: Audio) -> Audio:
+        """Source separation: pull the vocals (singing or speech) out of a music track."""
+
+    @abstractmethod
     def detect_watermark(self, audio: Audio) -> float:
         """Perth watermark score: 1.0 for Chatterbox output, 0.0 for unwatermarked audio."""
 

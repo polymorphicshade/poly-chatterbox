@@ -200,6 +200,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("audio", type=Path, help="Recording to clean (WAV/FLAC/OGG/MP3).")
     _add_output(p)
 
+    p = sub.add_parser("vocals", help="Isolate the vocals of a music track (no drums, bass or instruments) with an AI model.")
+    p.add_argument("audio", type=Path, help="Music track or recording (WAV/FLAC/OGG/MP3).")
+    _add_output(p)
+
     p = sub.add_parser("watermark", help="Check audio for the Perth watermark Chatterbox embeds.")
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
@@ -301,6 +305,10 @@ def run(args) -> int:
         if not args.json:
             print(f"heard ({meta.get('source_language')}): {meta.get('transcript')}\n"
                   f"said  ({meta.get('language')}): {meta.get('translation')}", file=sys.stderr)
+        return 0
+    if cmd == "vocals":
+        wav, meta = client.isolate_vocals(args.audio)
+        _write_output(args, wav, meta)
         return 0
     if cmd == "denoise":
         wav, meta = client.denoise(args.audio)

@@ -150,3 +150,10 @@ def test_translate_speech(engine, tmp_path, ref_wav, capsys):
     assert json.loads(stdout)["voice"] == "podcast"
     code, _, err = run(capsys, "translate-speech", str(ref_wav), "-l", "fr", "-o", str(out))
     assert code == 2 and "source_language" in err
+
+
+def test_vocals(engine, tmp_path, ref_wav, capsys):
+    out = tmp_path / "vocals.wav"
+    code, stdout, err = run(capsys, "vocals", str(ref_wav), "-o", str(out), "--json")
+    assert code == 0 and out.is_file(), err
+    assert json.loads(stdout)["mode"] == "vocals"

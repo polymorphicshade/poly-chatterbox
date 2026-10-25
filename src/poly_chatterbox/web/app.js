@@ -13,6 +13,7 @@ const MODES = [
   { id: "whisper", label: "Whisper", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
   { id: "speechtranslate", label: "Speech Translation", hint: "Translate a recording: it is transcribed, translated and spoken in another language, in the voice of your choice (or the original speaker's). For example English speech in, Japanese speech out in a cloned voice." },
   { id: "denoise", label: "Clean Audio", hint: "Remove background noise from a recording with an AI speech-enhancement model and keep the voice. Handy for a reference clip made in a noisy room: clean it, then use it to clone." },
+  { id: "vocals", label: "Isolate Vocals", hint: "Extract the vocals or voices from a music track: an AI model separates them from the drums, bass and instruments. Download the vocals, or use them as a reference clip for cloning." },
 ];
 
 const SAMPLE_TEXTS = {
@@ -494,6 +495,10 @@ function renderForm(ws) {
       + voiceField(ws)
       + `<div class="help">The recording is transcribed with Whisper, translated with NLLB-200 and spoken with Chatterbox Multilingual.</div>`;
     submit = "Translate speech";
+  } else if (mode.id === "vocals") {
+    html = audioField(ws, "source", "Music track", "Upload or record the track to take the vocals from.")
+      + `<div class="help">Works for singing and for speech over music. Long tracks take a while: the first request also downloads the model. Files up to 25 MB.</div>`;
+    submit = "Isolate vocals";
   } else if (mode.id === "denoise") {
     html = audioField(ws, "source", "Recording to clean", "Upload or record the audio with background noise.");
     submit = "Remove noise";
@@ -892,7 +897,7 @@ function buildRequest(ws) {
     }
     return { url: `/api/tts/${mode.model}`, init: { method: "POST", body: fd }, label: `${mode.label}${from} · ${voice}`, text: ws.text };
   }
-  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : mode.id === "denoise" ? "Add the recording to clean (upload or record)." : "Add the audio to check.");
+  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : mode.id === "denoise" ? "Add the recording to clean (upload or record)." : mode.id === "vocals" ? "Add the music track (upload or record)." : "Add the audio to check.");
   fd.append(mode.id === "vc" ? "source_audio" : "audio", rt.files.source.file);
   if (mode.id === "speechtranslate") {
     fd.delete("audio");
@@ -907,6 +912,9 @@ function buildRequest(ws) {
   if (mode.id === "whisper") {
     if (ws.whisperLang) fd.append("language", ws.whisperLang);
     return { url: "/api/transcribe", init: { method: "POST", body: fd }, label: `Whisper · ${rt.files.source.file.name}`, text: "", json: true };
+  }
+  if (mode.id === "vocals") {
+    return { url: "/api/vocals", init: { method: "POST", body: fd }, label: `Vocals · ${rt.files.source.file.name}`, text: "" };
   }
   if (mode.id === "denoise") {
     return { url: "/api/denoise", init: { method: "POST", body: fd }, label: `Clean · ${rt.files.source.file.name}`, text: "" };
@@ -993,7 +1001,7 @@ function renderResults(ws) {
         <div><b>Said (${esc(langName(m.language))}):</b> ${esc(m.translation)}</div></div>` : ""}
       ${(m.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
       <div class="links"><a href="${r.url}" download="${file}">Download WAV</a>
-        ${m.mode === "denoise" ? `<button type="button" class="link" data-use-ref="${r.id}" title="Clone a voice from this cleaned clip">Use as reference clip</button>` : ""}</div></div>`;
+        ${m.mode === "denoise" || m.mode === "vocals" ? `<button type="button" class="link" data-use-ref="${r.id}" title="Clone a voice from this clip">Use as reference clip</button>` : ""}</div></div>`;
   }).join("");
   // Autoplay only once per result.
   rt.results.forEach((r) => { if (r.url) r.played = true; });
