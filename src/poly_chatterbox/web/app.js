@@ -459,11 +459,8 @@ function renderForm(ws) {
   let html = "";
   let submit = "Generate";
   if (mode.model) {
-    html = (mode.model === "multilingual" ? languageField(ws) : "") + voiceField(ws) + textField(ws, mode.model)
-      + presetField(ws, mode.model) + slidersField(ws, mode.model) + generationField(ws, mode.model);
-
     html = (mode.model === "multilingual" ? languageField(ws) : "") + translateField(ws, mode.model) + voiceField(ws) + textField(ws, mode.model)
-      + slidersField(ws, mode.model) + generationField(ws, mode.model);
+      + presetField(ws, mode.model) + slidersField(ws, mode.model) + generationField(ws, mode.model);
   } else if (mode.id === "vc") {
     html = audioField(ws, "source", "Speech to convert", "No recording yet. Upload or record the speech whose voice you want to change.")
       + voiceField(ws, { label: "Target voice", target: true });
