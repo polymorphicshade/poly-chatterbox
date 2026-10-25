@@ -10,6 +10,7 @@ const MODES = [
   { id: "original", label: "Original", model: "original", hint: "The original Chatterbox (English, 500M), with creative control: raise exaggeration for drama and lower CFG / pace to slow it down." },
   { id: "vc", label: "Voice Conversion", hint: "Keep the words, timing and intonation of a recording but change the voice: upload or record speech, then pick the target voice." },
   { id: "watermark", label: "Watermark", hint: "Everything Chatterbox generates carries an imperceptible Perth watermark. Check whether a clip has one." },
+  { id: "whisper", label: "Whisper", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
 ];
 
 const SAMPLE_TEXTS = {
@@ -52,7 +53,7 @@ function newWorkspace(name) {
     id: uid(), name: name || `Workspace ${app.workspaces.length + 1}`, mode: "turbo",
     text: SAMPLE_TEXTS.turbo, language: "fr", version: "",
     voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", promptId: "", saveName: "",
-    voiceFilter: { q: "", kind: "" }, gen: {},
+    voiceFilter: { q: "", kind: "" }, gen: {}, whisperLang: "",
   };
 }
 
@@ -413,6 +414,14 @@ function renderForm(ws) {
   } else if (mode.id === "watermark") {
     html = audioField(ws, "source", "Audio to check", "Upload or record the clip to check.");
     submit = "Check for watermark";
+  } else if (mode.id === "whisper") {
+    const langs = Object.entries(app.info?.languages || {});
+    html = audioField(ws, "source", "Audio to transcribe", "Upload or record the speech to transcribe.")
+      + `<div class="field"><label for="${ws.id}-wlang">Language spoken</label><select id="${ws.id}-wlang" data-k="whisperLang">
+          <option value="">Detect automatically</option>
+          ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.whisperLang ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
+        </select><div class="help">Picking the language avoids mistakes on short or noisy clips.</div></div>`;
+    submit = "Transcribe";
   }
   html += `<div class="actions">
       <button type="submit" class="primary" ${rt.busy ? "disabled" : ""}>${rt.busy ? '<span class="spinner"></span> Working…' : submit}</button>
@@ -746,8 +755,12 @@ function buildRequest(ws) {
     }
     return { url: `/api/tts/${mode.model}`, init: { method: "POST", body: fd }, label: `${mode.label} · ${voice}`, text: ws.text };
   }
-  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : "Add the audio to check.");
+  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : "Add the audio to check.");
   fd.append(mode.id === "vc" ? "source_audio" : "audio", rt.files.source.file);
+  if (mode.id === "whisper") {
+    if (ws.whisperLang) fd.append("language", ws.whisperLang);
+    return { url: "/api/transcribe", init: { method: "POST", body: fd }, label: `Whisper · ${rt.files.source.file.name}`, text: "", json: true };
+  }
   if (mode.id === "watermark") {
     return { url: "/api/watermark", init: { method: "POST", body: fd }, label: `Watermark · ${rt.files.source.file.name}`, text: "", json: true };
   }
@@ -763,6 +776,7 @@ function showError(ws, msg) {
 async function generate(ws) {
   const rt = app.runtime[ws.id];
   if (rt.busy) return;
+  const mode = modeOf(ws);
   showError(ws, "");
   let req;
   try {
@@ -779,7 +793,8 @@ async function generate(ws) {
   try {
     const res = await api(req.url, req.init);
     if (req.json) {
-      Object.assign(entry, { pending: false, watermark: await res.json() });
+      const body = await res.json();
+      Object.assign(entry, { pending: false, ...(mode.id === "whisper" ? { transcript: body } : { watermark: body }) });
     } else {
       const meta = JSON.parse(decodeURIComponent(res.headers.get("X-TTS-Metadata") || "%7B%7D"));
       const blob = await res.blob();
@@ -808,6 +823,12 @@ function renderResults(ws) {
     if (r.pending) return `<div class="result pending"><div class="title"><span>${esc(r.label)}</span><span class="spinner"></span></div>
       ${r.text ? `<div class="text">${esc(r.text)}</div>` : ""}<div class="meta">Working… the first request may take a while to download and load the model.</div></div>`;
     if (r.error) return `<div class="result">${head(r)}<div class="error">${esc(r.error)}</div></div>`;
+    if (r.transcript) {
+      const t = r.transcript;
+      return `<div class="result">${head(r)}<textarea class="transcript" readonly rows="6" aria-label="Transcript">${esc(t.text)}</textarea>
+        <div class="meta"><span>${t.duration} s audio</span><span>${t.elapsed} s to transcribe</span>${t.language ? `<span>${esc(langName(t.language))}</span>` : ""}</div>
+        <div class="links"><button type="button" class="link" data-copy="${r.id}">Copy text</button></div></div>`;
+    }
     if (r.watermark) {
       const w = r.watermark;
       return `<div class="result">${head(r)}<div class="score ${w.watermarked ? "yes" : ""}">${w.watermarked ? "Watermarked" : "No watermark"}</div>
@@ -823,6 +844,18 @@ function renderResults(ws) {
   }).join("");
   // Autoplay only once per result.
   rt.results.forEach((r) => { if (r.url) r.played = true; });
+  list.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    const r = rt.results.find((x) => x.id === b.dataset.copy);
+    try {
+      await navigator.clipboard.writeText(r.transcript.text);
+      b.textContent = "Copied";
+    } catch {
+      const area = b.closest(".result").querySelector("textarea");
+      area.select();
+      b.textContent = "Press Ctrl+C to copy";
+    }
+    setTimeout(() => { b.textContent = "Copy text"; }, 1800);
+  }));
   list.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", () => {
     const idx = rt.results.findIndex((r) => r.id === b.dataset.remove);
     const [r] = rt.results.splice(idx, 1);

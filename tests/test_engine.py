@@ -161,3 +161,13 @@ def test_span_voice_accent_warning(engine):
 def test_span_options_unsupported_by_model_warn_once(engine):
     r = engine.turbo("[settings exaggeration=0.9]a[/settings] b [settings cfg_weight=0.2 top_k=50]c[/settings]")
     assert r.warnings == ["Chatterbox-Turbo ignores exaggeration, cfg_weight."]
+
+
+def test_transcribe(engine):
+    out = engine.transcribe(load_audio(make_wav(3)), "German")
+    assert out["language"] == "de" and out["duration"] == 3.0 and out["text"] == out["segments"][0]["text"]
+    assert engine.transcribe(load_audio(make_wav(3)))["language"] is None
+    assert engine.transcribe(load_audio(make_wav(3)), "Auto")["language"] is None
+    assert engine.backend.calls[-1] == ("transcribe", {"language": None})
+    with pytest.raises(ValueError, match="silent"):
+        engine.transcribe((np.zeros(16000, dtype=np.float32), 16000))

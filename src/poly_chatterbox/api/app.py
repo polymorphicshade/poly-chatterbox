@@ -135,6 +135,17 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
             raise HTTPException(400, "audio is empty.")
         return await run_in_threadpool(eng().detect_watermark, clip)
 
+    @app.post("/api/transcribe", tags=["meta"])
+    async def transcribe(
+        audio: UploadFile = File(..., description="Speech to transcribe (WAV/FLAC/OGG/MP3)."),
+        language: Optional[str] = Form(None, description="Language spoken: a code (fr) or name (French). Default: detect it."),
+    ):
+        """Whisper speech-to-text: the transcript, plus timestamped segments."""
+        clip = await _read_upload(audio, "Audio")
+        if clip is None:
+            raise HTTPException(400, "audio is empty.")
+        return await run_in_threadpool(eng().transcribe, clip, language or None)
+
     # ------------------------------------------------------------------ voice library
 
     @app.get("/api/voices", tags=["voices"])

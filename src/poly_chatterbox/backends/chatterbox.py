@@ -22,6 +22,7 @@ from .base import MULTILINGUAL, NANO, ORIGINAL, TURBO, Backend, BackendError, Ge
 log = logging.getLogger(__name__)
 
 VC = "vc"
+WHISPER = "whisper"
 MAX_CACHED_VOICES = 32
 
 
@@ -55,6 +56,7 @@ class ChatterboxBackend(Backend):
         self._builtin: dict[str, Any] = {}  # model key -> its built-in voice (conds / VC ref_dict)
         self._voices: OrderedDict[tuple, Any] = OrderedDict()  # (model key, clip fingerprint, ...) -> conds
         self._watermarker = None
+        self._aux: dict[str, Any] = {}  # helper models (Whisper, ...) that aren't part of the TTS LRU
         # One lock for loading and generation: a single GPU runs one job at a time, and the upstream
         # models keep the current voice as mutable state.
         self._lock = threading.RLock()
@@ -119,6 +121,21 @@ class ChatterboxBackend(Backend):
             self._models[key] = model
             self._builtin[key] = model.ref_dict if key == VC else model.conds
             return model
+
+    def aux_model(self, key: str, load):
+        """A helper model, loaded on first use and kept resident (they are small next to the TTS models)."""
+        with self._lock:
+            if key not in self._aux:
+                log.info("Loading %s on %s", key, self.device)
+                t0 = time.perf_counter()
+                try:
+                    self._aux[key] = load()
+                except BackendError:
+                    raise
+                except Exception as e:
+                    raise BackendError(f"Failed to load the {key} model: {e}") from e
+                log.info("Loaded %s in %.1fs", key, time.perf_counter() - t0)
+            return self._aux[key]
 
     @staticmethod
     def _free_memory() -> None:
@@ -200,6 +217,35 @@ class ChatterboxBackend(Backend):
             with _wav_file(source) as path:
                 wav = m.generate(path)
         return wav.squeeze(0).cpu().numpy().astype(np.float32), int(m.sr)
+
+    def transcribe(self, audio, language=None):
+        import librosa
+        import torch
+
+        def load():
+            from transformers import pipeline
+
+            dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+            return pipeline("automatic-speech-recognition", model=self.settings.whisper_model, dtype=dtype,
+                            device=self.device)
+
+        wav, sr = audio
+        if sr != 16000:
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
+        generate_kwargs = {"task": "transcribe"}
+        if language:
+            generate_kwargs["language"] = language
+        with self._lock:
+            pipe = self.aux_model(WHISPER, load)
+            out = pipe({"raw": np.ascontiguousarray(wav, dtype=np.float32), "sampling_rate": 16000},
+                       chunk_length_s=30, return_timestamps=True, generate_kwargs=generate_kwargs)
+        total = len(audio[0]) / audio[1]
+        segments = []
+        for chunk in out.get("chunks") or []:
+            start, end = chunk.get("timestamp") or (None, None)
+            segments.append({"start": round(float(start or 0.0), 2), "end": round(float(end if end is not None else total), 2),
+                             "text": chunk["text"].strip()})
+        return {"text": out["text"].strip(), "segments": segments}
 
     def detect_watermark(self, audio):
         import perth

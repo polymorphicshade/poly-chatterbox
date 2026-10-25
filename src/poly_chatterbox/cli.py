@@ -162,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
 
+    p = sub.add_parser("transcribe", help="Whisper speech-to-text: print the transcript of a recording.")
+    p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
+    p.add_argument("-l", "--language", help="Language spoken, code or name (default: detect it).")
+    p.add_argument("--json", action="store_true", help="Print the transcript with timestamped segments as JSON.")
+
     p = sub.add_parser("stream", help="Live voice conversion: mic in, converted voice out to an audio device "
                                        "(e.g. a virtual cable for Discord).",
                        description="Listens to a microphone, converts each phrase you say with Chatterbox voice conversion "
@@ -239,6 +244,10 @@ def run(args) -> int:
             print(json.dumps(result))
         else:
             print(f"{'watermarked' if result['watermarked'] else 'no watermark'} (score {result['score']})")
+        return 0
+    if cmd == "transcribe":
+        result = client.transcribe(args.audio, args.language)
+        print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
         return 0
     if cmd == "convert":
         wav, meta = client.convert(args.source, args.target_audio, args.voice)

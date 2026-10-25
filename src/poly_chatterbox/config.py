@@ -27,6 +27,9 @@ class Settings:
     # Long text is split at sentence boundaries into chunks of at most this many characters.
     max_chunk_chars: int = field(default_factory=lambda: int(_env("MAX_CHUNK_CHARS", "300")))
 
+    # Hugging Face id of the Whisper checkpoint used by the Whisper tab / `transcribe` (loaded on first use).
+    whisper_model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "openai/whisper-large-v3-turbo"))
+
     # Where saved prompts live (default: <data dir>/prompts). Lets a deployment mount them on their own volume.
     prompts_path: str = field(default_factory=lambda: _env("PROMPTS_DIR", ""))
 

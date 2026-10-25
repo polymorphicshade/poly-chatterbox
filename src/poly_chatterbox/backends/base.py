@@ -126,6 +126,13 @@ class Backend(ABC):
         """Voice conversion: re-voice ``source`` with ``target``'s timbre (None: the built-in voice)."""
 
     @abstractmethod
+    def transcribe(self, audio: Audio, language: Optional[str] = None) -> dict[str, Any]:
+        """Speech to text with Whisper. ``language`` is a code or name (None: detect it).
+
+        Returns ``{"text": str, "segments": [{"start": float, "end": float, "text": str}, ...]}``.
+        """
+
+    @abstractmethod
     def detect_watermark(self, audio: Audio) -> float:
         """Perth watermark score: 1.0 for Chatterbox output, 0.0 for unwatermarked audio."""
 

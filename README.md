@@ -13,6 +13,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
 | Voice library (built-in, 24 demo voices, your saved clones) | voice picker in every mode | `GET/POST/DELETE /api/voices` | `poly-chatterbox voices` |
 | Perth watermark detection | Watermark | `POST /api/watermark` | `poly-chatterbox watermark` |
+| Speech to text with Whisper | Whisper | `POST /api/transcribe` | `poly-chatterbox transcribe` |
 
 Multilingual languages: Arabic, Danish, German, Greek, English, Spanish, Finnish, French, Hebrew, Hindi, Italian, Japanese, Korean, Malay, Dutch, Norwegian, Polish, Portuguese, Russian, Swedish, Swahili, Turkish and Chinese.
 
@@ -218,6 +219,7 @@ poly-chatterbox original "This is incredible!" --exaggeration 0.8 --cfg-weight 0
 poly-chatterbox convert speech.wav --target-audio someone.wav -o converted.wav
 poly-chatterbox voices add "Me" --ref-audio me.wav -l en
 poly-chatterbox watermark converted.wav
+poly-chatterbox transcribe speech.wav -l en
 echo "Text from a pipe" | poly-chatterbox turbo --voice podcast -o - > out.wav
 ```
 
@@ -255,6 +257,7 @@ curl -X POST localhost:8000/api/tts/original -F text="Big news!" -F voice_id=pod
   -F generation='{"exaggeration": 0.8}' -o original.wav
 curl -X POST localhost:8000/api/vc -F source_audio=@speech.wav -F target_voice_id=sample_de -o converted.wav
 curl -X POST localhost:8000/api/watermark -F audio=@converted.wav
+curl -X POST localhost:8000/api/transcribe -F audio=@speech.wav -F language=fr
 ```
 
 The full schema is at `/docs`.
@@ -262,6 +265,10 @@ The full schema is at `/docs`.
 ## Watermarking
 
 Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com/resemble-ai/perth) watermark, an imperceptible neural watermark that survives MP3 compression and common edits. The Watermark mode, `POST /api/watermark` and `poly-chatterbox watermark` report whether a clip carries it.
+
+## Whisper transcription
+
+The Whisper mode is a plain speech-to-text tool: upload or record audio, optionally pick the spoken language (otherwise it is detected), and copy the transcript. `POST /api/transcribe` (multipart `audio`, optional `language`) returns `{"text", "segments": [{"start", "end", "text"}], "language", "duration", "elapsed"}`, and `poly-chatterbox transcribe FILE [-l LANG] [--json]` does the same from the shell. The checkpoint (`openai/whisper-large-v3-turbo` by default, about 1.6 GB) is downloaded on first use and set with `POLY_CHATTERBOX_WHISPER_MODEL`; it stays loaded next to the TTS models without counting toward `MAX_LOADED_MODELS`.
 
 ## Configuration (environment variables)
 
@@ -271,6 +278,7 @@ Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com
 | `POLY_CHATTERBOX_DEVICE` | `auto` (CUDA, then MPS, then CPU; or `cuda:1`, `cpu`, …) |
 | `POLY_CHATTERBOX_MULTILINGUAL_VERSION` | `v3` (`v2` for the previous checkpoint) |
 | `POLY_CHATTERBOX_MAX_LOADED_MODELS` | `3` (least recently used model is unloaded first; 3 fits a 16 GB GPU) |
+| `POLY_CHATTERBOX_WHISPER_MODEL` | `openai/whisper-large-v3-turbo` (any Hugging Face Whisper checkpoint) |
 | `POLY_CHATTERBOX_DATA_DIR` | `./data` |
 | `POLY_CHATTERBOX_PROMPTS_DIR` | `<data dir>/prompts` (`/data/prompts` in Docker) |
 | `POLY_CHATTERBOX_MIN_REF_SECONDS` / `_MAX_REF_SECONDS` | `5` / `60` |

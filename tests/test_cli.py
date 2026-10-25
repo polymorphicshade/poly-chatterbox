@@ -91,3 +91,10 @@ def test_prompts_save_list_show_and_use(engine, tmp_path, capsys):
     assert code == 0
     code, _, err = run(capsys, "turbo", "--prompt", "french_hello", "-o", str(out))
     assert code == 2 and "Unknown prompt" in err
+
+
+def test_transcribe(engine, ref_wav, capsys):
+    code, stdout, err = run(capsys, "transcribe", str(ref_wav), "-l", "en")
+    assert code == 0 and stdout.startswith("Placeholder transcript"), err
+    code, stdout, _ = run(capsys, "transcribe", str(ref_wav), "--json")
+    assert json.loads(stdout)["segments"]

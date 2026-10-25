@@ -51,6 +51,12 @@ class MockBackend(Backend):
         self.calls.append(("convert", dict(target=target is not None)))
         return _tone(len(source[0]) / source[1], _voice_key(target), None), SAMPLE_RATE
 
+    def transcribe(self, audio, language=None):
+        self.calls.append(("transcribe", dict(language=language)))
+        seconds = len(audio[0]) / audio[1]
+        text = f"Placeholder transcript of {seconds:.1f} seconds of audio."
+        return {"text": text, "segments": [{"start": 0.0, "end": round(seconds, 3), "text": text}]}
+
     def detect_watermark(self, audio):
         self.calls.append(("detect_watermark", {}))
         return 0.0

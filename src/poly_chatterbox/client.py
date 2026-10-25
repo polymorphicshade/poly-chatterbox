@@ -80,6 +80,9 @@ class LocalClient:
     def watermark(self, audio: Path) -> dict:
         return self.engine.detect_watermark(load_audio(audio))
 
+    def transcribe(self, audio: Path, language=None) -> dict:
+        return self.engine.transcribe(load_audio(audio), language)
+
     def info(self) -> dict:
         from .backends import GENERATION_OPTIONS
         from .engine import MODEL_LABELS
@@ -176,6 +179,10 @@ class HttpClient:
 
     def watermark(self, audio: Path) -> dict:
         return self._check(self.http.post("/api/watermark", files=self._files(audio=audio))).json()
+
+    def transcribe(self, audio: Path, language=None) -> dict:
+        data = {"language": language} if language else None
+        return self._check(self.http.post("/api/transcribe", data=data, files=self._files(audio=audio))).json()
 
     def info(self) -> dict:
         return self._check(self.http.get("/api/info")).json()

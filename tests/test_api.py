@@ -172,3 +172,18 @@ def test_prompt_dir_is_configurable(settings, tmp_path):
     engine = Engine(settings, MockBackend())
     engine.save_prompt("Mounted", "hi")
     assert (tmp_path / "elsewhere" / "mounted.json").is_file()
+
+
+def test_transcribe(client):
+    res = client.post("/api/transcribe", data={"language": "French"}, files={"audio": ("a.wav", make_wav(2), "audio/wav")})
+    body = res.json()
+    assert res.status_code == 200 and body["text"] and body["language"] == "fr" and body["segments"][0]["start"] == 0.0
+    auto = client.post("/api/transcribe", data={"language": "auto"}, files={"audio": ("a.wav", make_wav(2), "audio/wav")})
+    assert auto.json()["language"] is None
+    assert client.post("/api/transcribe").status_code == 422
+    assert client.post("/api/transcribe", files={"audio": ("a.wav", b"junk", "audio/wav")}).status_code == 400
+
+
+def test_web_ui_has_whisper_tab(client):
+    js = client.get("/static/app.js").text
+    assert '"whisper"' in js and "/api/transcribe" in js

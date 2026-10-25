@@ -131,6 +131,21 @@ class Engine:
             language=normalize_language(language) if language else None, version=version or None,
             voice_id=voice_id or None, generation={k: v for k, v in (generation or {}).items() if v is not None}))
 
+    def transcribe(self, audio: Audio, language: Optional[str] = None) -> dict[str, Any]:
+        """Whisper speech-to-text. ``language`` is a code or name; unset or "auto" detects it."""
+        wav, sr = audio
+        if not wav.size or float(np.max(np.abs(wav))) < 1e-3:
+            raise ValueError("The audio is silent: there is nothing to transcribe.")
+        language = (language or "").strip()
+        if language.lower() in ("", "auto"):
+            language = None
+        elif language.lower() in LANGUAGES or language.lower() in {n.lower() for n in LANGUAGES.values()}:
+            language = normalize_language(language)  # Whisper takes the same ISO codes
+        t0 = time.perf_counter()
+        out = self.backend.transcribe(audio, language)
+        return {**out, "language": language, "duration": round(len(wav) / sr, 3),
+                "elapsed": round(time.perf_counter() - t0, 3)}
+
     def detect_watermark(self, audio: Audio) -> dict[str, Any]:
         """Look for the Perth watermark that Chatterbox embeds in everything it generates."""
         score = self.backend.detect_watermark(audio)
