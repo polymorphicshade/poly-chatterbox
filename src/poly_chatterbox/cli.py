@@ -90,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      description="Chatterbox TTS: voice cloning in English and 23 languages, voice conversion.")
     parser.add_argument("--server", default=os.environ.get("POLY_CHATTERBOX_SERVER"),
                         help="Use a running poly-chatterbox server (e.g. http://127.0.0.1:8000) instead of loading models locally.")
+    parser.add_argument("--insecure", action="store_true",
+                        help="With --server: don't verify the TLS certificate (for the self-signed HTTPS stack).")
     parser.add_argument("--backend", choices=["chatterbox", "mock"], help="Local backend (default: chatterbox; env POLY_CHATTERBOX_BACKEND).")
     parser.add_argument("--device", help="Local device, e.g. cuda, cuda:1, mps or cpu (default: auto).")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show model loading logs.")
@@ -160,6 +162,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
 
+    p = sub.add_parser("stream", help="Live voice conversion: mic in, converted voice out to an audio device "
+                                       "(e.g. a virtual cable for Discord).",
+                       description="Listens to a microphone, converts each phrase you say with Chatterbox voice conversion "
+                                   "and plays it on an output device. Run it on the PC that has the audio devices; "
+                                   "use --server to do the conversion on another machine.")
+    p.add_argument("--list-devices", action="store_true", help="List the audio devices and exit.")
+    p.add_argument("--input", help="Microphone: a device number or part of its name (default: the system default input).")
+    p.add_argument("--output", help="Where the converted voice plays: a device number or part of its name, e.g. "
+                                    '"CABLE Input" (default: the system default output).')
+    target = p.add_mutually_exclusive_group()
+    target.add_argument("--voice", help="Library voice id to sound like (default: the built-in voice).")
+    target.add_argument("--target-audio", type=Path, help="Clip of the voice to sound like, >= 5 s.")
+    p.add_argument("--threshold", type=float, help="Speech level (RMS, 0-1) that counts as talking. "
+                                                   "Default: measured from the background noise at startup.")
+    p.add_argument("--silence-ms", type=int, default=500, help="Pause that ends a phrase (default: 500).")
+    p.add_argument("--min-ms", type=int, default=300, help="Ignore sounds shorter than this (default: 300).")
+    p.add_argument("--max-seconds", type=float, default=15.0, help="Cut a phrase after this long without a pause (default: 15).")
+
     sub.add_parser("info", help="Show backend, models, languages and generation options.")
 
     p = sub.add_parser("serve", help="Run the web UI + REST API.")
@@ -177,7 +197,7 @@ def _client(args):
     if args.server:
         from .client import HttpClient
 
-        return HttpClient(args.server)
+        return HttpClient(args.server, verify=not args.insecure)
     from .client import LocalClient
 
     return LocalClient()
@@ -194,8 +214,18 @@ def run(args) -> int:
     if args.command == "serve":
         return _serve(args)
 
+    if args.command == "stream" and args.list_devices:
+        from . import stream
+
+        return stream.list_devices()
+
     client = _client(args)
     cmd = args.command
+    if cmd == "stream":
+        from . import stream
+
+        return stream.run(client, args.input, args.output, args.voice, args.target_audio, args.threshold,
+                          args.silence_ms, args.min_ms, args.max_seconds)
     if cmd == "info":
         print(json.dumps(client.info(), indent=2, ensure_ascii=False))
         return 0

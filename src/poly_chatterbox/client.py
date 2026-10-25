@@ -48,6 +48,14 @@ class LocalClient:
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._out(self.engine.convert(load_audio(source_audio), _load(target_audio), target_voice_id))
 
+    def convert_clip(self, audio, target_audio: Optional[Path] = None, target_voice_id=None):
+        """Voice-convert an in-memory clip; returns ``(wav, sample_rate)``. Used by live streaming."""
+        return self._audio_of(self.engine.convert(audio, _load(target_audio), target_voice_id))
+
+    @staticmethod
+    def _audio_of(result):
+        return result.audio, result.sample_rate
+
     def voices(self) -> list[dict]:
         return [v.to_dict() for v in self.engine.library.list()]
 
@@ -87,10 +95,10 @@ class ApiError(RuntimeError):
 
 
 class HttpClient:
-    def __init__(self, base_url: str, timeout: float = 900.0):
+    def __init__(self, base_url: str, timeout: float = 900.0, verify: bool = True):
         import httpx
 
-        self.http = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
+        self.http = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, verify=verify)
 
     def _check(self, res):
         if res.status_code >= 400:
@@ -130,6 +138,17 @@ class HttpClient:
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._post_form("/api/vc", dict(target_voice_id=target_voice_id),
                                source_audio=source_audio, target_audio=target_audio)
+
+    def convert_clip(self, audio, target_audio: Optional[Path] = None, target_voice_id=None):
+        """Voice-convert an in-memory clip on the server; returns ``(wav, sample_rate)``."""
+        from .audio import to_wav_bytes
+
+        files = {"source_audio": ("phrase.wav", to_wav_bytes(*audio), "audio/wav")}
+        if target_audio:
+            files["target_audio"] = (Path(target_audio).name, Path(target_audio).read_bytes(), "application/octet-stream")
+        data = {"target_voice_id": target_voice_id} if target_voice_id else None
+        content, _ = self._audio(self.http.post("/api/vc", data=data, files=files))
+        return load_audio(content)
 
     def voices(self) -> list[dict]:
         return self._check(self.http.get("/api/voices")).json()

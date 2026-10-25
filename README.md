@@ -10,6 +10,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Original Chatterbox (English, 500M) with exaggeration and CFG/pace | Original | `POST /api/tts/original` | `poly-chatterbox original` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
+| Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
 | Voice library (built-in, 24 demo voices, your saved clones) | voice picker in every mode | `GET/POST/DELETE /api/voices` | `poly-chatterbox voices` |
 | Perth watermark detection | Watermark | `POST /api/watermark` | `poly-chatterbox watermark` |
 
@@ -97,6 +98,101 @@ Tips from upstream:
 * **Your clones**: save one with `poly-chatterbox voices add`, `POST /api/voices` or the UI. They are stored in `data/voices/`.
 
 Any voice works with any model and as a voice conversion target. `poly-chatterbox voices list` lists every voice.
+
+## Live voice conversion (Discord and other apps)
+
+`poly-chatterbox stream` listens to your microphone, cuts your speech into phrases at the pauses, converts each one with Chatterbox voice conversion and plays it on an output device. Point that output at a **virtual audio cable** and any app (Discord, OBS, a game, a call) can use the cable as its microphone, so it hears the converted voice instead of yours.
+
+```
+your mic ──► poly-chatterbox stream ──► virtual cable (output) ═══► Discord (input)
+                  │
+        Chatterbox voice conversion (your GPU, or a --server)
+```
+
+It is near-real-time: each phrase is heard about a second after you stop talking (the pause that ends the phrase, plus roughly 0.4 s of conversion on an RTX 4070 Ti Super). The converted voice keeps your timing and intonation; only the voice changes. Use only voices you have permission to use.
+
+The command runs on the PC that has the microphone and the virtual cable. By default it converts in-process on that PC's GPU. With `--server https://host:8443` (and `--insecure` for the self-signed certificate) it sends each phrase to a server's `/api/vc` endpoint instead.
+
+### What you need
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| [uv](https://docs.astral.sh/uv/) (installs Python) | `winget install astral-sh.uv` | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| git (the watermark library installs from git) | `winget install Git.Git` | `xcode-select --install` | `sudo apt install git` |
+| GPU | NVIDIA, driver 570 or newer | Apple silicon (uses MPS) | NVIDIA, driver 570 or newer |
+| PortAudio (audio I/O) | bundled | bundled | `sudo apt install libportaudio2` |
+| Virtual audio cable | [VB-CABLE](https://vb-audio.com/Cable/) | [BlackHole](https://existential.audio/blackhole/) (`brew install blackhole-2ch`) | a PulseAudio/PipeWire null sink (no install) |
+
+Without a GPU it still runs (`--device cpu`), but conversion is much slower, which may be too slow to feel live.
+
+The Windows steps below were tested end to end. The macOS and Linux setups use each platform's standard virtual-device tools but have not been tried on real hardware, so check the device names with `--list-devices`.
+
+### Example: stream your voice into Discord (Windows)
+
+1. **Install the virtual cable.** Download VB-CABLE, unzip it, run `VBCABLE_Setup_x64.exe` as administrator, then reboot. Windows now has a playback device called **CABLE Input** and a recording device called **CABLE Output**: audio sent to the first comes out of the second.
+
+2. **Install poly-chatterbox's dependencies.** In the repo folder:
+   ```
+   uv sync --extra chatterbox --extra stream
+   ```
+
+3. **Save the voice you want to sound like.** Use a clean clip of at least 5 seconds (about 10 s of one speaker works best; WAV, FLAC, OGG or MP3):
+   ```
+   uv run poly-chatterbox voices add "Target" --ref-audio C:\path\to\target_voice.mp3 -l en
+   ```
+   This stores it in the voice library as `target`. To try things first without your own clip, use a demo voice such as `podcast` or `sample_de` (`uv run poly-chatterbox voices list` shows them all).
+
+4. **Find your devices** (optional but useful):
+   ```
+   uv run poly-chatterbox stream --list-devices
+   ```
+
+5. **Start streaming.** `--input` is your microphone and `--output` is the cable; both take a device number or part of its name:
+   ```
+   uv run poly-chatterbox stream --input "Shure" --output "CABLE Input" --voice target
+   ```
+   Stay quiet for the one-second background-noise measurement. When it prints "Listening", talk, pause, and the converted phrase plays on the cable. Each phrase's timing is printed. Press Ctrl+C to stop. The first run downloads the model.
+
+6. **Point Discord at the cable.** In User Settings → Voice & Video, set **Input Device** to **CABLE Output (VB-Audio Virtual Cable)**. Turn off **Noise Suppression**, **Echo Cancellation** and **Automatic Gain Control** (they can clip converted speech), and use **Let's Check** to confirm the level moves when you talk. Wear headphones so Discord doesn't pick up your speakers.
+
+7. **Optional: hear what Discord hears.** Windows Sound settings → Recording → **CABLE Output** → Properties → Listen → tick **Listen to this device** and choose your headphones. This adds a little delay.
+
+### macOS
+
+1. `brew install uv blackhole-2ch` (restart after installing BlackHole), then `xcode-select --install` if git is missing.
+2. `uv sync --extra chatterbox --extra stream`, then save a voice as in step 3 above.
+3. `uv run poly-chatterbox stream --input "MacBook" --output "BlackHole" --voice target` (use `--list-devices` for your mic's name).
+4. In Discord, choose **BlackHole 2ch** as the Input Device. To hear the output yourself, create a Multi-Output Device in Audio MIDI Setup that includes your headphones and BlackHole, and select it as `--output` instead.
+
+### Linux
+
+1. `sudo apt install git libportaudio2`, install uv, then `uv sync --extra chatterbox --extra stream` and save a voice as in step 3 above.
+2. Create a virtual microphone (it lasts until you log out; put the commands in a startup script to keep it):
+   ```
+   pactl load-module module-null-sink sink_name=chatterbox sink_properties=device.description=Chatterbox
+   pactl load-module module-remap-source master=chatterbox.monitor source_name=chatterbox_mic source_properties=device.description=ChatterboxMic
+   ```
+3. Send the output to that sink and start streaming:
+   ```
+   PULSE_SINK=chatterbox uv run poly-chatterbox stream --input default --output pulse --voice target
+   ```
+   If `--input default` isn't accepted, give your microphone's number or name from `--list-devices`.
+4. In Discord, choose **ChatterboxMic** as the Input Device.
+
+### Tuning and troubleshooting
+
+| Problem | Try |
+|---|---|
+| Sentences are split in the middle | `--silence-ms 700` (a longer pause ends a phrase) |
+| Too much delay | `--silence-ms 350` (may split sentences) |
+| Nothing happens when you talk | Check the "Speech threshold" it printed; lower it with `--threshold 0.004`, and confirm `--input` is the right mic |
+| Room noise or breathing triggers conversion | Raise `--threshold`, or raise `--min-ms` to ignore short sounds |
+| "conversion is falling behind" | Conversion is slower than your speech: pause longer between phrases, free GPU memory, or use a `--server` with a faster GPU |
+| Discord hears nothing | Input Device must be the cable's **output** side ("CABLE Output" / "BlackHole" / "ChatterboxMic"), while `--output` is its **input** side |
+| Robotic or clipped audio | Turn off Discord's noise suppression, echo cancellation and automatic gain |
+| Voice sounds off | Use a longer, cleaner target clip (10 s of one speaker, no music), or try a target close to your own pitch |
+
+More options: `--target-audio clip.wav` (use a clip directly instead of a library voice), `--max-seconds` (cut a very long phrase) and `--threshold` (what counts as talking; by default measured from the background noise at startup).
 
 ## Saved prompts
 
@@ -187,7 +283,7 @@ Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com
 uv run pytest      # uses the mock backend; no GPU needed
 ```
 
-Layout: `src/poly_chatterbox/` contains `engine.py` (the feature logic), `backends/` (chatterbox, mock), `text.py` (pause markup and chunking), `library.py` (the voice library), `languages.py`, `api/` (FastAPI), `web/` (UI) and `cli.py`. `src/chatterbox/` is the vendored upstream model code.
+Layout: `src/poly_chatterbox/` contains `engine.py` (the feature logic), `backends/` (chatterbox, mock), `text.py` (pause markup and chunking), `library.py` (the voice library), `languages.py`, `api/` (FastAPI), `web/` (UI) and `cli.py`. `stream.py` is the live voice conversion client, and `prompts.py` the saved prompts. `src/chatterbox/` is the vendored upstream model code.
 
 ## Disclaimer
 

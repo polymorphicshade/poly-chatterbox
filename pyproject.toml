@@ -37,6 +37,12 @@ chatterbox = [
     "omegaconf",
 ]
 
+# Live voice conversion from a microphone to an audio device (`poly-chatterbox stream`).
+stream = [
+    "sounddevice>=0.5",
+    "scipy>=1.11",
+]
+
 [project.scripts]
 poly-chatterbox = "poly_chatterbox.cli:main"
 
