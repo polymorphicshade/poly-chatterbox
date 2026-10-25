@@ -9,6 +9,8 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Chatterbox Multilingual v3 / v2 (23 languages) | Multilingual | `POST /api/tts/multilingual` | `poly-chatterbox multilingual` |
 | Original Chatterbox (English, 500M) with exaggeration and CFG/pace | Original | `POST /api/tts/original` | `poly-chatterbox original` |
 | Emotion presets (mood bundles of generation options) | "Emotion preset" under the text | `GET /api/presets`, `preset` on each TTS endpoint | `poly-chatterbox presets`, `--emotion` |
+
+| Dialog translation, on the fly or on its own | "Translate from" in every TTS mode | `POST /api/translate`, `translate_from` on each TTS endpoint | `poly-chatterbox translate`, `--translate-from` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
@@ -285,6 +287,23 @@ Every clip Chatterbox generates carries Resemble AI's [Perth](https://github.com
 
 The Whisper mode is a plain speech-to-text tool: upload or record audio, optionally pick the spoken language (otherwise it is detected), and copy the transcript. `POST /api/transcribe` (multipart `audio`, optional `language`) returns `{"text", "segments": [{"start", "end", "text"}], "language", "duration", "elapsed"}`, and `poly-chatterbox transcribe FILE [-l LANG] [--json]` does the same from the shell. The checkpoint (`openai/whisper-large-v3-turbo` by default, about 1.6 GB) is downloaded on first use and set with `POLY_CHATTERBOX_WHISPER_MODEL`; it stays loaded next to the TTS models without counting toward `MAX_LOADED_MODELS`.
 
+## Translation
+
+Dialog can be translated between any two of the 23 supported languages and spoken in the voice you chose, so "English text, in this cloned voice, in Japanese" is one request. Translation uses [NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M) (distilled 600M, about 1.2 GB, downloaded on first use; the model card's licence is CC-BY-NC 4.0, so check it fits your use).
+
+* **Web UI:** every TTS mode has a *Translate from* menu. Pick the language your text is written in and it is translated into the spoken language when you generate: English for Turbo, Nano and Original, or the *Language* above for Multilingual. *Translate text now* swaps the text for its translation instead, so you can read and fix it before generating.
+* **API:** `POST /api/translate` (form fields `text`, `source`, `target`; returns `{"text", "source", "target", "elapsed"}`), and a `translate_from` form field on `/api/tts/original`, `/turbo`, `/nano` and `/multilingual`. The result metadata then has `translated_from`.
+* **CLI:** `poly-chatterbox translate "Hello" --from en --to ja`, and `--translate-from LANG` on `original`, `turbo`, `nano` and `multilingual`.
+
+`[pause]`, `[settings]`, `[voice]` and `[laugh]`-style tags are left where they are and only the text between them is translated. Multilingual doesn't understand the Turbo tags, so don't expect `[laugh]` to be acted on there.
+
+```sh
+poly-chatterbox multilingual "Good morning, everyone. [pause 400ms] Let's begin." -l ja --translate-from en --voice me -o ja.wav
+curl -X POST localhost:8000/api/tts/multilingual -F text="Good morning" -F language=ja -F translate_from=en -F voice_id=me -o ja.wav
+```
+
+Translation needs the target to be one of the 23 languages. To translate a *recording* (speech in, translated speech out), transcribe it first (the Whisper mode or `poly-chatterbox transcribe`), translate the text, then speak it.
+
 ## Configuration (environment variables)
 
 | variable | default |
@@ -294,6 +313,8 @@ The Whisper mode is a plain speech-to-text tool: upload or record audio, optiona
 | `POLY_CHATTERBOX_MULTILINGUAL_VERSION` | `v3` (`v2` for the previous checkpoint) |
 | `POLY_CHATTERBOX_MAX_LOADED_MODELS` | `3` (least recently used model is unloaded first; 3 fits a 16 GB GPU) |
 | `POLY_CHATTERBOX_WHISPER_MODEL` | `openai/whisper-large-v3-turbo` (any Hugging Face Whisper checkpoint) |
+
+| `POLY_CHATTERBOX_TRANSLATION_MODEL` | `facebook/nllb-200-distilled-600M` (any NLLB-200 checkpoint) |
 | `POLY_CHATTERBOX_DATA_DIR` | `./data` |
 | `POLY_CHATTERBOX_PROMPTS_DIR` | `<data dir>/prompts` (`/data/prompts` in Docker) |
 | `POLY_CHATTERBOX_MIN_REF_SECONDS` / `_MAX_REF_SECONDS` | `5` / `60` |

@@ -69,6 +69,10 @@ def _add_tts(p: argparse.ArgumentParser, models: tuple[str, ...]) -> None:
     p.add_argument("--emotion", choices=list(EMOTION_PRESETS), metavar="PRESET",
                    help=f"Emotion preset ({', '.join(EMOTION_PRESETS)}): a bundle of generation options. "
                         "Options you give explicitly win over it. See `presets`.")
+
+    p.add_argument("--translate-from", metavar="LANG",
+                   help="Language the text is written in, code or name: it is translated into the spoken language first "
+                        "(English for the English models, -l for multilingual). [tags] and markup are kept.")
     voice = p.add_mutually_exclusive_group()
     voice.add_argument("--ref-audio", type=Path, help="Reference clip of the voice to clone, >= 5 s (WAV/FLAC/OGG/MP3).")
     voice.add_argument("--voice", help="Library voice id (see `poly-chatterbox voices list`).")
@@ -165,6 +169,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("presets", help="List the emotion presets and the generation options they set.")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("translate", help="Translate text between the 23 supported languages (prints the translation).")
+    p.add_argument("text", nargs="?", help="Text to translate ('-' or omitted: read stdin).")
+    p.add_argument("--text-file", help="Read the text from a file.")
+    p.add_argument("--from", dest="source", required=True, metavar="LANG", help="Language the text is written in, code or name.")
+    p.add_argument("--to", dest="target", required=True, metavar="LANG", help="Language to translate into, code or name.")
+    p.add_argument("--json", action="store_true", help="Print the result as JSON.")
+
     p = sub.add_parser("watermark", help="Check audio for the Perth watermark Chatterbox embeds.")
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
@@ -254,6 +265,11 @@ def run(args) -> int:
                 options = " ".join(f"{k}={v}" for k, v in pr["options"].items())
                 print(f"{pr['id']:<10} {pr['description']}\n{'':<10} {options}")
         return 0
+
+    if cmd == "translate":
+        result = client.translate(_read_text(args), args.source, args.target)
+        print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
+        return 0
     if cmd == "watermark":
         result = client.watermark(args.audio)
         if args.json:
@@ -281,15 +297,16 @@ def run(args) -> int:
         if not args.ref_audio and not args.voice:
             args.voice = saved.get("voice_id")
     if cmd == "original":
-        wav, meta = client.original(text, args.ref_audio, args.voice, gen, args.emotion)
+        wav, meta = client.original(text, args.ref_audio, args.voice, gen, args.emotion, args.translate_from)
     elif cmd in ("turbo", "nano"):
-        wav, meta = client.turbo(text, args.ref_audio, args.voice, gen, nano=cmd == "nano", preset=args.emotion)
+        wav, meta = client.turbo(text, args.ref_audio, args.voice, gen, nano=cmd == "nano", preset=args.emotion,
+                                 translate_from=args.translate_from)
     elif cmd == "multilingual":
         language = args.language or saved.get("language")
         if not language:
             raise ValueError("A language is required: use -l, or a saved prompt that has one.")
         wav, meta = client.multilingual(text, language, args.ref_audio, args.voice,
-                                        args.model_version or saved.get("version"), gen, args.emotion)
+                                        args.model_version or saved.get("version"), gen, args.emotion, args.translate_from)
     else:  # pragma: no cover - argparse enforces the choices
         raise SystemExit(f"unknown command {cmd}")
     _write_output(args, wav, meta)

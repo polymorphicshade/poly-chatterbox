@@ -113,3 +113,17 @@ def test_emotion_presets(engine, tmp_path, capsys):
     assert {p["id"] for p in json.loads(stdout)} >= {"sad", "excited"}
     with pytest.raises(SystemExit):
         main(["--backend", "mock", "turbo", "Hi", "--emotion", "giddy"])
+
+
+def test_translate(engine, tmp_path, capsys):
+    code, stdout, err = run(capsys, "translate", "Hello there", "--from", "en", "--to", "Japanese")
+    assert code == 0 and stdout.strip() == "(ja) Hello there", err
+    code, stdout, _ = run(capsys, "translate", "Hi", "--from", "en", "--to", "fr", "--json")
+    assert json.loads(stdout)["target"] == "fr"
+    out = tmp_path / "t.wav"
+    code, stdout, err = run(capsys, "multilingual", "Good morning", "-l", "ja", "--translate-from", "en", "-o", str(out), "--json")
+    assert code == 0, err
+    assert json.loads(stdout)["translated_from"] == "en"
+    assert [c for c in engine.backend.calls if c[0] == "synthesize"][-1][1]["texts"] == ["(ja) Good morning"]
+    code, _, err = run(capsys, "translate", "Hi", "--from", "en", "--to", "tlh")
+    assert code == 2 and "Unsupported language" in err

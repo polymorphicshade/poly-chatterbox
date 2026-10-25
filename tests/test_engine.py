@@ -213,3 +213,29 @@ def test_preset_in_settings_markup(engine):
     assert not res.warnings and last_call(engine, "synthesize")["params"].exaggeration is None
     with pytest.raises(ValueError, match="Unknown emotion preset"):
         engine.original("[settings preset=giddy]x[/settings]")
+
+
+def test_translate(engine):
+    out = engine.translate("Hello [pause 200ms] friend", "English", "ja")
+    assert out["text"] == "(ja) Hello [pause 200ms] (ja) friend" and (out["source"], out["target"]) == ("en", "ja")
+    assert engine.translate("Same", "fr", "French")["text"] == "Same"
+    with pytest.raises(ValueError, match="Unsupported language"):
+        engine.translate("Hi", "en", "Klingon")
+    with pytest.raises(ValueError, match="Text is required"):
+        engine.translate("  ", "en", "fr")
+
+
+def test_translate_before_speaking(engine):
+    res = engine.multilingual("Good morning [pause 100ms] everyone", "Japanese", translate_from="English")
+    assert res.details["translated_from"] == "en" and res.language == "ja"
+    assert last_call(engine, "synthesize")["texts"] == ["(ja) Good morning", "(ja) everyone"]
+    # English models translate into English.
+    res = engine.turbo("Bonjour", translate_from="fr")
+    assert last_call(engine, "synthesize")["texts"] == ["(en) Bonjour"] and res.details["translated_from"] == "fr"
+    # Already in the spoken language: nothing to do.
+    res = engine.multilingual("Hola", "es", translate_from="Spanish")
+    assert "translated_from" not in res.details and last_call(engine, "synthesize")["texts"] == ["Hola"]
+    res = engine.original("Hi", translate_from="none")
+    assert "translated_from" not in res.details
+    with pytest.raises(ValueError, match="Unsupported language"):
+        engine.original("Hi", translate_from="Klingon")

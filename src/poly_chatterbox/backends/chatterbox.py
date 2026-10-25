@@ -23,6 +23,16 @@ log = logging.getLogger(__name__)
 
 VC = "vc"
 WHISPER = "whisper"
+
+TRANSLATOR = "translator"
+
+# NLLB-200 language codes for the 23 Chatterbox Multilingual languages.
+NLLB_CODES = {
+    "ar": "arb_Arab", "da": "dan_Latn", "de": "deu_Latn", "el": "ell_Grek", "en": "eng_Latn", "es": "spa_Latn",
+    "fi": "fin_Latn", "fr": "fra_Latn", "he": "heb_Hebr", "hi": "hin_Deva", "it": "ita_Latn", "ja": "jpn_Jpan",
+    "ko": "kor_Hang", "ms": "zsm_Latn", "nl": "nld_Latn", "no": "nob_Latn", "pl": "pol_Latn", "pt": "por_Latn",
+    "ru": "rus_Cyrl", "sv": "swe_Latn", "sw": "swh_Latn", "tr": "tur_Latn", "zh": "zho_Hans",
+}
 MAX_CACHED_VOICES = 32
 
 
@@ -246,6 +256,30 @@ class ChatterboxBackend(Backend):
             segments.append({"start": round(float(start or 0.0), 2), "end": round(float(end if end is not None else total), 2),
                              "text": chunk["text"].strip()})
         return {"text": out["text"].strip(), "segments": segments}
+
+    def translate(self, texts, source, target):
+        import torch
+
+        def load():
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+            name = self.settings.translation_model
+            dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+            model = AutoModelForSeq2SeqLM.from_pretrained(name, dtype=dtype).to(self.device).eval()
+            return AutoTokenizer.from_pretrained(name), model
+
+        out: list[str] = []
+        with self._lock:
+            tokenizer, model = self.aux_model(TRANSLATOR, load)
+            tokenizer.src_lang = NLLB_CODES[source]
+            target_id = tokenizer.convert_tokens_to_ids(NLLB_CODES[target])
+            for i in range(0, len(texts), 8):
+                batch = tokenizer(texts[i:i + 8], return_tensors="pt", padding=True, truncation=True, max_length=512)
+                with torch.inference_mode():
+                    ids = model.generate(**batch.to(self.device), forced_bos_token_id=target_id, num_beams=4,
+                                         max_new_tokens=512)
+                out.extend(s.strip() for s in tokenizer.batch_decode(ids, skip_special_tokens=True))
+        return out
 
     def detect_watermark(self, audio):
         import perth

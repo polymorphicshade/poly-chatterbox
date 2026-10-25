@@ -132,6 +132,9 @@ class Backend(ABC):
         Returns ``{"text": str, "segments": [{"start": float, "end": float, "text": str}, ...]}``.
         """
 
+    def translate(self, texts: list[str], source: str, target: str) -> list[str]:
+        """Translate each text from language code ``source`` to ``target`` (both in ``LANGUAGES``)."""
+
     @abstractmethod
     def detect_watermark(self, audio: Audio) -> float:
         """Perth watermark score: 1.0 for Chatterbox output, 0.0 for unwatermarked audio."""

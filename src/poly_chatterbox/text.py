@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .backends.base import GENERATION_OPTIONS
 from .presets import preset_options
@@ -104,6 +104,38 @@ def split_text(text: str, max_chars: int) -> list[str]:
         for clause in _pack(_split_after(_CLAUSE_END, sentence), max_chars, " "):
             chunks.extend([clause] if len(clause) <= max_chars else _pack(clause.split(" "), max_chars, " "))
     return chunks
+
+
+_BRACKETED = re.compile(r"\[[^\]]*\]")
+
+
+def translate_markup(text: str, translate: Callable[[list[str]], list[str]], max_chars: int = 300) -> str:
+    """Translate the prose of ``text`` and leave every ``[bracketed]`` tag (markup and Turbo's
+    paralinguistic tags) exactly where it is. ``translate`` maps a list of sentences to their translations.
+    """
+    pieces: list[str] = []  # alternating: prose, tag, prose, tag, ..., prose
+    pos = 0
+    for m in _BRACKETED.finditer(text):
+        pieces += [text[pos:m.start()], m.group()]
+        pos = m.end()
+    pieces.append(text[pos:])
+
+    chunks = [split_text(p, max_chars) for p in pieces[::2]]
+    flat = [c for group in chunks for c in group]
+    translated = iter(translate(flat) if flat else [])
+    out: list[str] = []
+    for i, piece in enumerate(pieces):
+        if i % 2:
+            out.append(piece)
+            continue
+        group = chunks[i // 2]
+        if not group:
+            out.append(piece)
+            continue
+        lead = piece[:len(piece) - len(piece.lstrip())]
+        trail = piece[len(piece.rstrip()):]
+        out.append(lead + " ".join(next(translated) for _ in group).strip() + trail)
+    return "".join(out)
 
 
 def _convert(name: str, raw: str) -> Any:

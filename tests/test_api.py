@@ -204,3 +204,29 @@ def test_presets(client):
 
 def test_web_ui_has_presets(client):
     assert "data-preset" in client.get("/static/app.js").text
+
+
+def test_translate(client):
+    res = client.post("/api/translate", data={"text": "Hello [laugh] there", "source": "en", "target": "French"})
+    assert res.status_code == 200
+    assert res.json()["text"] == "(fr) Hello [laugh] (fr) there" and res.json()["target"] == "fr"
+    assert client.post("/api/translate", data={"text": "x", "source": "en", "target": "tlh"}).status_code == 400
+    assert client.post("/api/translate", data={"text": "x", "source": "en"}).status_code == 422
+
+
+def test_translate_on_the_fly(client):
+    res = client.post("/api/tts/multilingual", data={"text": "Good morning", "language": "ja", "translate_from": "English"},
+                      files=ref())
+    assert_wav(res)
+    assert meta(res)["translated_from"] == "en" and meta(res)["language"] == "ja" and meta(res)["voice"] == "upload"
+    for path in ("original", "turbo", "nano"):
+        res = client.post(f"/api/tts/{path}", data={"text": "Bonjour", "translate_from": "fr"})
+        assert_wav(res)
+        assert meta(res)["translated_from"] == "fr"
+    bad = client.post("/api/tts/turbo", data={"text": "x", "translate_from": "Klingon"})
+    assert bad.status_code == 400
+
+
+def test_web_ui_has_translation(client):
+    js = client.get("/static/app.js").text
+    assert "translate-now" in js and "/api/translate" in js

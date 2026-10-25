@@ -53,7 +53,7 @@ function newWorkspace(name) {
     id: uid(), name: name || `Workspace ${app.workspaces.length + 1}`, mode: "turbo",
     text: SAMPLE_TEXTS.turbo, language: "fr", version: "",
     voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", promptId: "", saveName: "",
-    voiceFilter: { q: "", kind: "" }, gen: {}, whisperLang: "", preset: {},
+    voiceFilter: { q: "", kind: "" }, gen: {}, whisperLang: "", preset: {}, translateFrom: "",
   };
 }
 
@@ -291,6 +291,24 @@ function languageField(ws) {
     </select></div></div>`;
 }
 
+// Translate the text on the fly before it is spoken. The target is the model's language (English, or the Language above).
+function translateField(ws, model) {
+  const target = model === "multilingual" ? ws.language : "en";
+  const langs = Object.entries(app.info?.languages || {}).filter(([code]) => code !== target);
+  return `<div class="field"><label for="${ws.id}-translate">Translate from</label>
+    <div class="translate-tools">
+      <select id="${ws.id}-translate" data-k="translateFrom">
+        <option value="">No translation (the text is already ${esc(langName(target))})</option>
+        ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.translateFrom ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
+      </select>
+      <button type="button" class="btn small" data-action="translate-now" ${ws.translateFrom && ws.translateFrom !== target ? "" : "disabled"}
+        title="Replace the text below with its ${esc(langName(target))} translation, so you can read and edit it first">Translate text now</button>
+    </div>
+    <div class="help">${ws.translateFrom && ws.translateFrom !== target
+      ? `The text is written in ${esc(langName(ws.translateFrom))} and is translated into ${esc(langName(target))} when you generate. Your voice, and any [pause], [settings] and [voice] markup, stay as they are.`
+      : `Write the text in another language and it is translated into ${esc(langName(target))} before it is spoken, in whichever voice you chose.`}</div></div>`;
+}
+
 function voicePicker(ws) {
   const f = ws.voiceFilter;
   const q = (f.q || "").toLowerCase();
@@ -437,6 +455,9 @@ function renderForm(ws) {
   if (mode.model) {
     html = (mode.model === "multilingual" ? languageField(ws) : "") + voiceField(ws) + textField(ws, mode.model)
       + presetField(ws, mode.model) + slidersField(ws, mode.model) + generationField(ws, mode.model);
+
+    html = (mode.model === "multilingual" ? languageField(ws) : "") + translateField(ws, mode.model) + voiceField(ws) + textField(ws, mode.model)
+      + slidersField(ws, mode.model) + generationField(ws, mode.model);
   } else if (mode.id === "vc") {
     html = audioField(ws, "source", "Speech to convert", "No recording yet. Upload or record the speech whose voice you want to change.")
       + voiceField(ws, { label: "Target voice", target: true });
@@ -489,7 +510,7 @@ function bindForm(ws, form) {
         if (preview) preview.innerHTML = settingsPreview(ws);
       }
       save();
-      if (input.tagName === "SELECT" && ["voiceId", "language"].includes(key)) renderForm(ws);
+      if (input.tagName === "SELECT" && ["voiceId", "language", "translateFrom"].includes(key)) renderForm(ws);
     };
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", handler);
   });
@@ -534,6 +555,7 @@ function bindForm(ws, form) {
     showError(ws, "");
     wrapSelection(ws, form, `[voice: ${id}]`, "[/voice]");
   });
+  form.querySelector("[data-action='translate-now']")?.addEventListener("click", () => translateNow(ws));
   form.querySelector("[data-action='load-prompt']")?.addEventListener("click", () => loadPrompt(ws));
   form.querySelector("[data-action='save-prompt']")?.addEventListener("click", () => savePrompt(ws));
   form.querySelector("[data-action='delete-prompt']")?.addEventListener("click", () => deletePrompt(ws));
@@ -626,6 +648,30 @@ async function toggleRecording(ws, slot) {
   rt.recSlot = slot;
   recorder.start();
   renderForm(ws);
+}
+
+// ------------------------------------------------------------------ translation
+
+async function translateNow(ws) {
+  const target = modeOf(ws).model === "multilingual" ? ws.language : "en";
+  showError(ws, "");
+  if (!ws.text.trim()) return showError(ws, "There is no text to translate.");
+  const fd = new FormData();
+  fd.append("text", ws.text);
+  fd.append("source", ws.translateFrom);
+  fd.append("target", target);
+  const button = app.runtime[ws.id].el.querySelector("[data-action='translate-now']");
+  if (button) { button.disabled = true; button.textContent = "Translating…"; }
+  try {
+    const out = await (await api("/api/translate", { method: "POST", body: fd })).json();
+    ws.text = out.text;
+    ws.translateFrom = "";
+    save();
+    renderForm(ws);
+  } catch (e) {
+    showError(ws, e.message);
+    if (button) { button.disabled = false; button.textContent = "Translate text now"; }
+  }
 }
 
 // ------------------------------------------------------------------ voices
@@ -786,12 +832,14 @@ function buildRequest(ws) {
     const voice = appendVoice(ws, fd, { audioField: "ref_audio", voiceField: "voice_id" });
     const generation = cleanGen(ws.gen[ws.mode]);
     if (generation) fd.append("generation", JSON.stringify(generation));
+    if (ws.translateFrom) fd.append("translate_from", ws.translateFrom);
+    const from = ws.translateFrom ? ` · from ${langName(ws.translateFrom)}` : "";
     if (mode.model === "multilingual") {
       fd.append("language", ws.language);
       if (ws.version) fd.append("version", ws.version);
-      return { url: "/api/tts/multilingual", init: { method: "POST", body: fd }, label: `Multilingual · ${langName(ws.language)} · ${voice}`, text: ws.text };
+      return { url: "/api/tts/multilingual", init: { method: "POST", body: fd }, label: `Multilingual · ${langName(ws.language)}${from} · ${voice}`, text: ws.text };
     }
-    return { url: `/api/tts/${mode.model}`, init: { method: "POST", body: fd }, label: `${mode.label} · ${voice}`, text: ws.text };
+    return { url: `/api/tts/${mode.model}`, init: { method: "POST", body: fd }, label: `${mode.label}${from} · ${voice}`, text: ws.text };
   }
   if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : "Add the audio to check.");
   fd.append(mode.id === "vc" ? "source_audio" : "audio", rt.files.source.file);

@@ -68,3 +68,21 @@ def test_settings_values_and_case():
 def test_markup_errors(markup, message):
     with pytest.raises(ValueError, match=message):
         parse_markup(markup)
+
+
+def test_translate_markup_keeps_tags():
+    from poly_chatterbox.text import translate_markup
+
+    seen = []
+
+    def fake(sentences):
+        seen.extend(sentences)
+        return [s.upper() for s in sentences]
+
+    out = translate_markup(" Hello there. [pause 300ms] How are you? [settings temperature=0.5]Fine [laugh] thanks[/settings]", fake)
+    assert out == " HELLO THERE. [pause 300ms] HOW ARE YOU? [settings temperature=0.5]FINE [laugh] THANKS[/settings]"
+    assert seen == ["Hello there.", "How are you?", "Fine", "thanks"]
+    # Long prose is split into sentence-sized chunks, then joined again.
+    assert translate_markup("One. Two. Three.", fake, max_chars=8) == "ONE. TWO. THREE."
+    # Nothing to translate: the translator isn't called.
+    assert translate_markup("[pause]", lambda s: 1 / 0) == "[pause]"

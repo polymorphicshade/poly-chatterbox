@@ -30,6 +30,9 @@ class Settings:
     # Hugging Face id of the Whisper checkpoint used by the Whisper tab / `transcribe` (loaded on first use).
     whisper_model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "openai/whisper-large-v3-turbo"))
 
+    # Hugging Face id of the NLLB-200 checkpoint that translates dialog (loaded on first use).
+    translation_model: str = field(default_factory=lambda: _env("TRANSLATION_MODEL", "facebook/nllb-200-distilled-600M"))
+
     # Where saved prompts live (default: <data dir>/prompts). Lets a deployment mount them on their own volume.
     prompts_path: str = field(default_factory=lambda: _env("PROMPTS_DIR", ""))
 

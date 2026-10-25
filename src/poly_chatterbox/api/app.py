@@ -37,6 +37,10 @@ TEXT = Form(..., description="Text to speak. Long text is split at sentences. Ma
 REF_AUDIO = File(None, description="Reference clip of the voice to clone, 5 s or longer (WAV/FLAC/OGG/MP3).")
 VOICE_ID = Form(None, description="Or a library voice (see GET /api/voices). Neither: the model's built-in voice.")
 PRESET = Form(None, description="Emotion preset (see GET /api/presets), e.g. excited or sad. Options in `generation` win over it.")
+
+TRANSLATE_FROM = Form(None, description="Language the text is written in (code or name). It is translated into the spoken "
+                                        "language first: the model's own (English) or the multilingual `language`. "
+                                        "[tags] and markup are kept.")
 GENERATION = Form(None, description="GenerationOptions (see Schemas) as JSON, e.g. {\"temperature\": 0.7, \"seed\": 1}.")
 
 
@@ -135,6 +139,15 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         """Emotion presets: named bundles of generation options (exaggeration, CFG / pace, sampling) for a mood."""
         return describe_presets()
 
+    @app.post("/api/translate", tags=["meta"])
+    async def translate(
+        text: str = Form(..., description="Text to translate. [tags] and markup such as [pause 500ms] are kept as they are."),
+        source: str = Form(..., description="Language the text is written in: a code (en) or name (English)."),
+        target: str = Form(..., description="Language to translate into: a code (ja) or name (Japanese)."),
+    ):
+        """Translate dialog between any two of the 23 supported languages (NLLB-200)."""
+        return await run_in_threadpool(eng().translate, text, source, target)
+
     @app.post("/api/watermark", tags=["meta"])
     async def watermark(audio: UploadFile = File(..., description="Audio to check (WAV/FLAC/OGG/MP3).")):
         """Detect the Perth watermark that Chatterbox embeds in all generated audio."""
@@ -221,29 +234,31 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
     @app.post("/api/tts/original", tags=["tts"], response_class=Response, responses=WAV)
     async def original(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
                        voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
-                       preset: Optional[str] = PRESET):
+                       preset: Optional[str] = PRESET, translate_from: Optional[str] = TRANSLATE_FROM):
         """Chatterbox (English, 500M): voice cloning with exaggeration and CFG/pace control."""
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
-        return _audio_response(await run_in_threadpool(eng().original, text, ref, voice_id or None, params(gen), preset or None))
+        return _audio_response(await run_in_threadpool(eng().original, text, ref, voice_id or None, params(gen),
+                                                       preset or None, translate_from or None))
 
-    async def _turbo(text, ref_audio, voice_id, generation, preset, nano: bool) -> Response:
+    async def _turbo(text, ref_audio, voice_id, generation, preset, translate_from, nano: bool) -> Response:
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
-        result = await run_in_threadpool(eng().turbo, text, ref, voice_id or None, params(gen), nano, preset or None)
+        result = await run_in_threadpool(eng().turbo, text, ref, voice_id or None, params(gen), nano, preset or None,
+                                         translate_from or None)
         return _audio_response(result)
 
     @app.post("/api/tts/turbo", tags=["tts"], response_class=Response, responses=WAV)
     async def turbo(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
                     voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
-                    preset: Optional[str] = PRESET):
+                    preset: Optional[str] = PRESET, translate_from: Optional[str] = TRANSLATE_FROM):
         """Chatterbox-Turbo (English, 350M): low-latency TTS with paralinguistic tags such as [laugh] and [cough]."""
-        return await _turbo(text, ref_audio, voice_id, generation, preset, nano=False)
+        return await _turbo(text, ref_audio, voice_id, generation, preset, translate_from, nano=False)
 
     @app.post("/api/tts/nano", tags=["tts"], response_class=Response, responses=WAV)
     async def nano(text: str = TEXT, ref_audio: Optional[UploadFile] = REF_AUDIO,
                    voice_id: Optional[str] = VOICE_ID, generation: Optional[str] = GENERATION,
-                   preset: Optional[str] = PRESET):
+                   preset: Optional[str] = PRESET, translate_from: Optional[str] = TRANSLATE_FROM):
         """Chatterbox-Nano (English, 110M): Turbo's architecture in a CPU-friendly size, with the same tags."""
-        return await _turbo(text, ref_audio, voice_id, generation, preset, nano=True)
+        return await _turbo(text, ref_audio, voice_id, generation, preset, translate_from, nano=True)
 
     @app.post("/api/tts/multilingual", tags=["tts"], response_class=Response, responses=WAV)
     async def multilingual(
@@ -254,11 +269,12 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         version: Optional[str] = Form(None, description="Checkpoint: v3 (recommended) or v2. Default: server setting."),
         generation: Optional[str] = GENERATION,
         preset: Optional[str] = PRESET,
+        translate_from: Optional[str] = TRANSLATE_FROM,
     ):
-        """Chatterbox Multilingual (23 languages): voice cloning across languages."""
+        """Chatterbox Multilingual (23 languages): voice cloning across languages, optionally translating the text first."""
         ref, gen = await _read_upload(ref_audio), _generation_form(generation)
         result = await run_in_threadpool(eng().multilingual, text, language, ref, voice_id or None, version or None,
-                                         params(gen), preset or None)
+                                         params(gen), preset or None, translate_from or None)
         return _audio_response(result)
 
     @app.post("/api/vc", tags=["tts"], response_class=Response, responses=WAV)

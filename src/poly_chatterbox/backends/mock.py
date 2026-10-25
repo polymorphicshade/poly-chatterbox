@@ -57,6 +57,10 @@ class MockBackend(Backend):
         text = f"Placeholder transcript of {seconds:.1f} seconds of audio."
         return {"text": text, "segments": [{"start": 0.0, "end": round(seconds, 3), "text": text}]}
 
+    def translate(self, texts, source, target):
+        self.calls.append(("translate", dict(texts=texts, source=source, target=target)))
+        return [f"({target}) {t}" for t in texts]
+
     def detect_watermark(self, audio):
         self.calls.append(("detect_watermark", {}))
         return 0.0

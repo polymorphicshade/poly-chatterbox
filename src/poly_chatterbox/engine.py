@@ -21,7 +21,7 @@ from .languages import LANGUAGES, SAMPLES, normalize_language
 from .library import DEFAULT_VOICE, Voice, VoiceLibrary
 from .presets import apply_preset
 from .prompts import Prompt, PromptStore
-from .text import parse_markup
+from .text import parse_markup, translate_markup
 
 MODEL_LABELS = {ORIGINAL: "Chatterbox", TURBO: "Chatterbox-Turbo", NANO: "Chatterbox-Nano", MULTILINGUAL: "Chatterbox Multilingual"}
 
@@ -64,19 +64,27 @@ class Engine:
     # ================================================================ core features
 
     def original(self, text: str, ref_audio: Optional[Audio] = None, voice_id: Optional[str] = None,
-                 params: Optional[GenerationParams] = None, preset: Optional[str] = None) -> SynthesisResult:
+                 params: Optional[GenerationParams] = None, preset: Optional[str] = None,
+                 translate_from: Optional[str] = None) -> SynthesisResult:
         """Chatterbox (English, 500M): zero-shot cloning with exaggeration and CFG/pace control."""
-        return self._tts(ORIGINAL, text, ref_audio, voice_id, params or GenerationParams(), preset=preset)
+        return self._tts(ORIGINAL, text, ref_audio, voice_id, params or GenerationParams(), preset=preset,
+                         translate_from=translate_from)
 
     def turbo(self, text: str, ref_audio: Optional[Audio] = None, voice_id: Optional[str] = None,
-              params: Optional[GenerationParams] = None, nano: bool = False, preset: Optional[str] = None) -> SynthesisResult:
+              params: Optional[GenerationParams] = None, nano: bool = False, preset: Optional[str] = None,
+              translate_from: Optional[str] = None) -> SynthesisResult:
         """Chatterbox-Turbo (350M) or -Nano (110M): fast English TTS with paralinguistic tags like [laugh]."""
-        return self._tts(NANO if nano else TURBO, text, ref_audio, voice_id, params or GenerationParams(), preset=preset)
+        return self._tts(NANO if nano else TURBO, text, ref_audio, voice_id, params or GenerationParams(), preset=preset,
+                         translate_from=translate_from)
 
     def multilingual(self, text: str, language: str, ref_audio: Optional[Audio] = None,
                      voice_id: Optional[str] = None, version: Optional[str] = None,
-                     params: Optional[GenerationParams] = None, preset: Optional[str] = None) -> SynthesisResult:
-        """Chatterbox Multilingual (23 languages). Without a voice, the language's sample speaker is used."""
+                     params: Optional[GenerationParams] = None, preset: Optional[str] = None,
+                     translate_from: Optional[str] = None) -> SynthesisResult:
+        """Chatterbox Multilingual (23 languages). Without a voice, the language's sample speaker is used.
+
+        ``translate_from``: the language the text is written in; it is translated into ``language`` first.
+        """
         lang = normalize_language(language)
         version = (version or self.settings.multilingual_version).strip().lower()
         if version not in MULTILINGUAL_VERSIONS:
@@ -84,7 +92,8 @@ class Engine:
         if ref_audio is None and not voice_id and lang in SAMPLES:
             voice_id = f"sample_{lang}"
         p = params or GenerationParams()
-        return self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version, preset=preset)
+        return self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version, preset=preset,
+                         translate_from=translate_from)
 
     def convert(self, source: Audio, target_audio: Optional[Audio] = None,
                 target_voice_id: Optional[str] = None) -> SynthesisResult:
@@ -102,6 +111,16 @@ class Engine:
                                warnings=warnings, details={"model": "Chatterbox VC", "source_duration": round(len(wav) / sr, 3)})
 
     # ================================================================ library and tools
+
+    def translate(self, text: str, source: str, target: str) -> dict[str, Any]:
+        """Translate dialog between two of the 23 supported languages. ``[tags]`` and markup are kept as they are."""
+        if not text or not text.strip():
+            raise ValueError("Text is required.")
+        src, tgt = normalize_language(source), normalize_language(target)
+        t0 = time.perf_counter()
+        out = text if src == tgt else translate_markup(
+            text, lambda sentences: self.backend.translate(sentences, src, tgt), self.settings.max_chunk_chars)
+        return {"text": out, "source": src, "target": tgt, "elapsed": round(time.perf_counter() - t0, 3)}
 
     def save_voice(self, name: str, ref_audio: Audio, language: Optional[str] = None,
                    description: Optional[str] = None) -> Voice:
@@ -159,11 +178,19 @@ class Engine:
 
     def _tts(self, model: str, text: str, ref_audio: Optional[Audio], voice_id: Optional[str],
              params: GenerationParams, language: Optional[str] = None, version: Optional[str] = None,
-             preset: Optional[str] = None) -> SynthesisResult:
+             preset: Optional[str] = None, translate_from: Optional[str] = None) -> SynthesisResult:
         if not text or not text.strip():
             raise ValueError("Text is required.")
         if ref_audio is not None and voice_id:
             raise ValueError("Give at most one of ref_audio or voice_id.")
+        translated_from = None
+        if translate_from and translate_from.strip().lower() not in ("", "none"):
+            # The English models speak English; Multilingual speaks the requested language.
+            translated_from = normalize_language(translate_from)
+            if translated_from != (language or "en"):
+                text = self.translate(text, translated_from, language or "en")["text"]
+            else:
+                translated_from = None
         params = apply_preset(preset, params, model)  # explicit options win over the preset's
         segments = parse_markup(text, self.settings.max_chunk_chars, model)
         warnings: list[str] = []
@@ -202,6 +229,9 @@ class Engine:
         details: dict[str, Any] = {"model": MODEL_LABELS[model] + (f" {version}" if version else "")}
         if preset:
             details["preset"] = preset.strip().lower()
+
+        if translated_from:
+            details["translated_from"] = translated_from
         used = list(dict.fromkeys(voices[k[0]][1] for k in runs))
         if len(used) > 1:
             details["voices"] = used
