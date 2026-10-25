@@ -11,6 +11,7 @@ const MODES = [
   { id: "vc", label: "Voice Conversion", hint: "Keep the words, timing and intonation of a recording but change the voice: upload or record speech, then pick the target voice." },
   { id: "watermark", label: "Watermark", hint: "Everything Chatterbox generates carries an imperceptible Perth watermark. Check whether a clip has one." },
   { id: "whisper", label: "Whisper", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
+  { id: "denoise", label: "Clean Audio", hint: "Remove background noise from a recording with an AI speech-enhancement model and keep the voice. Handy for a reference clip made in a noisy room: clean it, then use it to clone." },
 ];
 
 const SAMPLE_TEXTS = {
@@ -351,6 +352,8 @@ function audioField(ws, slot, label, hint) {
       </div>
       <div class="ref-info ${bad ? "bad" : ""}">${info}</div>
       ${f ? `<audio controls src="${f.url}"></audio>` : ""}
+      ${f && slot === "ref" ? `<button type="button" class="btn small" data-denoise="${slot}" ${rt.cleaning ? "disabled" : ""}
+        title="Remove background noise with an AI model and replace this clip with the cleaned version">${rt.cleaning ? "Cleaning…" : "Remove background noise"}</button>` : ""}
     </div></div>`;
 }
 
@@ -473,6 +476,9 @@ function renderForm(ws) {
           ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.whisperLang ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
         </select><div class="help">Picking the language avoids mistakes on short or noisy clips.</div></div>`;
     submit = "Transcribe";
+  } else if (mode.id === "denoise") {
+    html = audioField(ws, "source", "Recording to clean", "Upload or record the audio with background noise.");
+    submit = "Remove noise";
   }
   html += `<div class="actions">
       <button type="submit" class="primary" ${rt.busy ? "disabled" : ""}>${rt.busy ? '<span class="spinner"></span> Working…' : submit}</button>
@@ -536,6 +542,7 @@ function bindForm(ws, form) {
     const file = e.target.files[0];
     if (file) setAudio(ws, input.dataset.file, file);
   }));
+  form.querySelectorAll("[data-denoise]").forEach((b) => b.addEventListener("click", () => denoiseSlot(ws, b.dataset.denoise)));
   form.querySelectorAll("[data-record]").forEach((b) => b.addEventListener("click", () => toggleRecording(ws, b.dataset.record)));
   form.querySelector("[data-action='reset-gen']")?.addEventListener("click", () => {
     ws.gen[ws.mode] = {};
@@ -600,6 +607,28 @@ async function setAudio(ws, slot, file) {
     ctx.close();
   } catch { /* the server validates anyway */ }
   renderForm(ws);
+}
+
+// Replace the clip in an audio slot with its noise-free version (POST /api/denoise).
+async function denoiseSlot(ws, slot) {
+  const rt = app.runtime[ws.id];
+  const entry = rt.files[slot];
+  if (!entry || rt.cleaning) return;
+  showError(ws, "");
+  rt.cleaning = true;
+  renderForm(ws);
+  try {
+    const fd = new FormData();
+    fd.append("audio", entry.file);
+    const blob = await (await api("/api/denoise", { method: "POST", body: fd })).blob();
+    const name = entry.file.name.replace(/\.[^.]*$/, "") + "-clean.wav";
+    rt.cleaning = false;
+    await setAudio(ws, slot, new File([blob], name, { type: "audio/wav" }));
+  } catch (e) {
+    rt.cleaning = false;
+    renderForm(ws);
+    showError(ws, e.message);
+  }
 }
 
 function encodeWav(buffer) {
@@ -841,11 +870,14 @@ function buildRequest(ws) {
     }
     return { url: `/api/tts/${mode.model}`, init: { method: "POST", body: fd }, label: `${mode.label}${from} · ${voice}`, text: ws.text };
   }
-  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : "Add the audio to check.");
+  if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : mode.id === "denoise" ? "Add the recording to clean (upload or record)." : "Add the audio to check.");
   fd.append(mode.id === "vc" ? "source_audio" : "audio", rt.files.source.file);
   if (mode.id === "whisper") {
     if (ws.whisperLang) fd.append("language", ws.whisperLang);
     return { url: "/api/transcribe", init: { method: "POST", body: fd }, label: `Whisper · ${rt.files.source.file.name}`, text: "", json: true };
+  }
+  if (mode.id === "denoise") {
+    return { url: "/api/denoise", init: { method: "POST", body: fd }, label: `Clean · ${rt.files.source.file.name}`, text: "" };
   }
   if (mode.id === "watermark") {
     return { url: "/api/watermark", init: { method: "POST", body: fd }, label: `Watermark · ${rt.files.source.file.name}`, text: "", json: true };
@@ -926,7 +958,8 @@ function renderResults(ws) {
       <audio controls preload="metadata" src="${r.url}" ${i === 0 && !r.played ? "autoplay" : ""}></audio>
       <div class="meta"><span>${m.duration ?? "?"} s audio</span><span>${m.elapsed ?? "?"} s to generate</span>${m.model ? `<span>${esc(m.model)}</span>` : ""}${m.segments > 1 ? `<span>${m.segments} chunks</span>` : ""}</div>
       ${(m.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
-      <div class="links"><a href="${r.url}" download="${file}">Download WAV</a></div></div>`;
+      <div class="links"><a href="${r.url}" download="${file}">Download WAV</a>
+        ${m.mode === "denoise" ? `<button type="button" class="link" data-use-ref="${r.id}" title="Clone a voice from this cleaned clip">Use as reference clip</button>` : ""}</div></div>`;
   }).join("");
   // Autoplay only once per result.
   rt.results.forEach((r) => { if (r.url) r.played = true; });
@@ -941,6 +974,15 @@ function renderResults(ws) {
       b.textContent = "Press Ctrl+C to copy";
     }
     setTimeout(() => { b.textContent = "Copy text"; }, 1800);
+  }));
+  list.querySelectorAll("[data-use-ref]").forEach((b) => b.addEventListener("click", async () => {
+    const r = rt.results.find((x) => x.id === b.dataset.useRef);
+    if (!r?.url) return;
+    ws.voiceSource = "upload";
+    if (!modeOf(ws).model) ws.mode = "turbo";
+    save();
+    renderModes(ws);
+    await setAudio(ws, "ref", new File([await (await fetch(r.url)).blob()], "cleaned-reference.wav", { type: "audio/wav" }));
   }));
   list.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", () => {
     const idx = rt.results.findIndex((r) => r.id === b.dataset.remove);

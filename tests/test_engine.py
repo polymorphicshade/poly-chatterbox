@@ -239,3 +239,43 @@ def test_translate_before_speaking(engine):
     assert "translated_from" not in res.details
     with pytest.raises(ValueError, match="Unsupported language"):
         engine.original("Hi", translate_from="Klingon")
+
+
+def test_process_windows():
+    import numpy as np
+
+    from poly_chatterbox.audio import process_windows
+
+    wav = np.sin(np.arange(16000 * 7) / 40.0).astype(np.float32)
+    seen = []
+
+    def identity(chunk):
+        seen.append(len(chunk))
+        return chunk
+
+    out = process_windows(wav, 16000, identity, window_s=3.0, overlap_s=0.5)
+    assert len(out) == len(wav) and np.allclose(out, wav, atol=1e-5)
+    assert len(seen) == 3 and max(seen) == 48000
+    # Short clips go through in one piece.
+    seen.clear()
+    process_windows(wav[:16000], 16000, identity, window_s=3.0)
+    assert seen == [16000]
+
+
+def test_denoise(engine):
+    wav = load_audio(make_wav(3))
+    res = engine.denoise(wav)
+    assert res.mode == "denoise" and res.sample_rate == wav[1] and len(res.audio) == len(wav[0])
+    # The mock halves the level; the engine restores the loudness of the input.
+    assert np.max(np.abs(res.audio)) == pytest.approx(np.max(np.abs(wav[0])), rel=1e-3)
+    assert engine.backend.calls[-1][0] == "denoise"
+    with pytest.raises(ValueError, match="silent"):
+        engine.denoise((np.zeros(16000, dtype=np.float32), 16000))
+
+
+def test_save_voice_denoised(engine):
+    engine.save_voice("Noisy", load_audio(make_wav(6)), denoise=True)
+    assert engine.backend.calls[-1][0] == "denoise"
+    engine.save_voice("Quiet", load_audio(make_wav(6)))
+    assert engine.backend.calls[-1][0] == "denoise"  # not called again for the second voice
+    assert len([c for c in engine.backend.calls if c[0] == "denoise"]) == 1

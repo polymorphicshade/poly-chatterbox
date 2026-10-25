@@ -138,6 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--ref-audio", type=Path, required=True, help="Clip of the voice, >= 5 s.")
     pa.add_argument("-l", "--language", help="Language spoken in the clip.")
     pa.add_argument("--description")
+    pa.add_argument("--denoise", action="store_true", help="Remove background noise from the clip before saving it.")
     pr = vs.add_parser("remove", help="Delete a saved cloned voice.")
     pr.add_argument("voice_id")
 
@@ -175,6 +176,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from", dest="source", required=True, metavar="LANG", help="Language the text is written in, code or name.")
     p.add_argument("--to", dest="target", required=True, metavar="LANG", help="Language to translate into, code or name.")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
+
+    p = sub.add_parser("denoise", help="Remove background noise from a recording (e.g. a reference clip) with an AI model.")
+    p.add_argument("audio", type=Path, help="Recording to clean (WAV/FLAC/OGG/MP3).")
+    _add_output(p)
 
     p = sub.add_parser("watermark", help="Check audio for the Perth watermark Chatterbox embeds.")
     p.add_argument("audio", type=Path, help="Audio file (WAV/FLAC/OGG/MP3).")
@@ -270,6 +275,10 @@ def run(args) -> int:
         result = client.translate(_read_text(args), args.source, args.target)
         print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
         return 0
+    if cmd == "denoise":
+        wav, meta = client.denoise(args.audio)
+        _write_output(args, wav, meta)
+        return 0
     if cmd == "watermark":
         result = client.watermark(args.audio)
         if args.json:
@@ -355,7 +364,7 @@ def _voices(args, client) -> int:
                 print(f"{v['id']:<20} {v['kind']:<8} {LANGUAGES.get(v['language'], 'any'):<11} {v['gender']:<8} {v['name']}")
             print(f"\n{len(voices)} voices", file=sys.stderr)
     elif args.voices_command == "add":
-        voice = client.save_voice(args.name, args.ref_audio, args.language, args.description)
+        voice = client.save_voice(args.name, args.ref_audio, args.language, args.description, args.denoise)
         print(voice["id"])
     elif args.voices_command == "remove":
         client.remove_voice(args.voice_id)

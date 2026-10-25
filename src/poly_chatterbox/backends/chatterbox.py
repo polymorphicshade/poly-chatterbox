@@ -33,6 +33,9 @@ NLLB_CODES = {
     "ko": "kor_Hang", "ms": "zsm_Latn", "nl": "nld_Latn", "no": "nob_Latn", "pl": "pol_Latn", "pt": "por_Latn",
     "ru": "rus_Cyrl", "sv": "swe_Latn", "sw": "swh_Latn", "tr": "tur_Latn", "zh": "zho_Hans",
 }
+
+DENOISER = "denoiser"
+DENOISE_RATE = 16000  # the enhancement model works at 16 kHz
 MAX_CACHED_VOICES = 32
 
 
@@ -280,6 +283,33 @@ class ChatterboxBackend(Backend):
                                          max_new_tokens=512)
                 out.extend(s.strip() for s in tokenizer.batch_decode(ids, skip_special_tokens=True))
         return out
+
+    def denoise(self, audio):
+        import librosa
+        import torch
+
+        def load():
+            from speechbrain.inference.separation import SepformerSeparation
+            from speechbrain.utils.fetching import LocalStrategy
+
+            return SepformerSeparation.from_hparams(
+                source=self.settings.denoise_model, savedir=str(self.settings.data_dir / "models" / "denoiser"),
+                run_opts={"device": self.device}, local_strategy=LocalStrategy.COPY)  # copy: no symlinks on Windows
+
+        wav, sr = audio
+        if sr != DENOISE_RATE:
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=DENOISE_RATE)
+        with self._lock:
+            model = self.aux_model(DENOISER, load)
+
+            def run(chunk: np.ndarray) -> np.ndarray:
+                with torch.inference_mode():
+                    est = model.separate_batch(torch.from_numpy(chunk).float().unsqueeze(0).to(self.device))
+                clean = est[0, :, 0].cpu().numpy()
+                return np.pad(clean, (0, max(0, len(chunk) - len(clean))))[:len(chunk)]
+
+            out = A.process_windows(np.ascontiguousarray(wav, dtype=np.float32), DENOISE_RATE, run)
+        return out.astype(np.float32), DENOISE_RATE
 
     def detect_watermark(self, audio):
         import perth

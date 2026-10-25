@@ -11,6 +11,8 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Emotion presets (mood bundles of generation options) | "Emotion preset" under the text | `GET /api/presets`, `preset` on each TTS endpoint | `poly-chatterbox presets`, `--emotion` |
 
 | Dialog translation, on the fly or on its own | "Translate from" in every TTS mode | `POST /api/translate`, `translate_from` on each TTS endpoint | `poly-chatterbox translate`, `--translate-from` |
+
+| Background-noise removal for reference clips (AI speech enhancement) | Clean Audio, and "Remove background noise" on a reference clip | `POST /api/denoise`, `denoise` on `POST /api/voices` | `poly-chatterbox denoise`, `voices add --denoise` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
@@ -304,6 +306,22 @@ curl -X POST localhost:8000/api/tts/multilingual -F text="Good morning" -F langu
 
 Translation needs the target to be one of the 23 languages. To translate a *recording* (speech in, translated speech out), transcribe it first (the Whisper mode or `poly-chatterbox transcribe`), translate the text, then speak it.
 
+## Cleaning noisy reference clips
+
+A reference clip recorded in a noisy room clones the noise along with the voice. The speech-enhancement model ([SpeechBrain SepFormer trained on the DNS4 challenge data](https://huggingface.co/speechbrain/sepformer-dns4-16k-enhancement), about 100 MB, downloaded on first use) separates the talker from the background so you can clone from the cleaned clip.
+
+* **Web UI:** the *Clean Audio* mode cleans a recording and lets you download it or click *Use as reference clip*. Anywhere you upload a reference clip there is also a *Remove background noise* button that replaces your clip with the cleaned one (you can listen to it before generating or saving).
+* **API:** `POST /api/denoise` (multipart `audio`) returns the cleaned `audio/wav`; `denoise=true` on `POST /api/voices` cleans the clip before saving it to the library.
+* **CLI:** `poly-chatterbox denoise noisy.wav -o clean.wav`, and `poly-chatterbox voices add "Me" --ref-audio noisy.wav --denoise`.
+
+The model works at 16 kHz, so cleaned clips are 16 kHz mono with their original loudness. Long clips are processed in 15 s windows and cross-faded. It is trained for speech against everyday noise (fans, traffic, chatter, room tone). Music or very loud noise can leave artifacts, and a second voice talking in the background may be kept, so use the cleanest 10 seconds you have. Set another SpeechBrain enhancement checkpoint with `POLY_CHATTERBOX_DENOISE_MODEL`.
+
+```sh
+poly-chatterbox denoise noisy_room.wav -o clean.wav
+poly-chatterbox voices add "Narrator" --ref-audio noisy_room.wav --denoise -l en
+curl -X POST localhost:8000/api/denoise -F audio=@noisy_room.wav -o clean.wav
+```
+
 ## Configuration (environment variables)
 
 | variable | default |
@@ -315,6 +333,8 @@ Translation needs the target to be one of the 23 languages. To translate a *reco
 | `POLY_CHATTERBOX_WHISPER_MODEL` | `openai/whisper-large-v3-turbo` (any Hugging Face Whisper checkpoint) |
 
 | `POLY_CHATTERBOX_TRANSLATION_MODEL` | `facebook/nllb-200-distilled-600M` (any NLLB-200 checkpoint) |
+
+| `POLY_CHATTERBOX_DENOISE_MODEL` | `speechbrain/sepformer-dns4-16k-enhancement` (any SpeechBrain SepFormer enhancement checkpoint) |
 | `POLY_CHATTERBOX_DATA_DIR` | `./data` |
 | `POLY_CHATTERBOX_PROMPTS_DIR` | `<data dir>/prompts` (`/data/prompts` in Docker) |
 | `POLY_CHATTERBOX_MIN_REF_SECONDS` / `_MAX_REF_SECONDS` | `5` / `60` |

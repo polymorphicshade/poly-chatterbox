@@ -127,3 +127,13 @@ def test_translate(engine, tmp_path, capsys):
     assert [c for c in engine.backend.calls if c[0] == "synthesize"][-1][1]["texts"] == ["(ja) Good morning"]
     code, _, err = run(capsys, "translate", "Hi", "--from", "en", "--to", "tlh")
     assert code == 2 and "Unsupported language" in err
+
+
+def test_denoise(engine, tmp_path, ref_wav, capsys):
+    out = tmp_path / "clean.wav"
+    code, stdout, err = run(capsys, "denoise", str(ref_wav), "-o", str(out), "--json")
+    assert code == 0 and out.is_file(), err
+    assert json.loads(stdout)["mode"] == "denoise"
+    code, stdout, _ = run(capsys, "voices", "add", "Clean Me", "--ref-audio", str(ref_wav), "--denoise")
+    assert code == 0 and stdout.strip() == "clean_me"
+    assert engine.backend.calls[-1][0] == "denoise"

@@ -65,8 +65,11 @@ class LocalClient:
     def voices(self) -> list[dict]:
         return [v.to_dict() for v in self.engine.library.list()]
 
-    def save_voice(self, name, ref_audio: Path, language=None, description=None) -> dict:
-        return self.engine.save_voice(name, load_audio(ref_audio), language, description).to_dict()
+    def save_voice(self, name, ref_audio: Path, language=None, description=None, denoise=False) -> dict:
+        return self.engine.save_voice(name, load_audio(ref_audio), language, description, denoise).to_dict()
+
+    def denoise(self, audio: Path) -> Result:
+        return self._out(self.engine.denoise(load_audio(audio)))
 
     def remove_voice(self, voice_id) -> None:
         self.engine.remove_voice(voice_id)
@@ -176,9 +179,13 @@ class HttpClient:
     def voices(self) -> list[dict]:
         return self._check(self.http.get("/api/voices")).json()
 
-    def save_voice(self, name, ref_audio: Path, language=None, description=None) -> dict:
-        data = {k: v for k, v in dict(name=name, language=language, description=description).items() if v is not None}
+    def save_voice(self, name, ref_audio: Path, language=None, description=None, denoise=False) -> dict:
+        data = {k: v for k, v in dict(name=name, language=language, description=description,
+                                      denoise="true" if denoise else None).items() if v is not None}
         return self._check(self.http.post("/api/voices", data=data, files=self._files(ref_audio=ref_audio))).json()
+
+    def denoise(self, audio: Path) -> Result:
+        return self._audio(self.http.post("/api/denoise", files=self._files(audio=audio)))
 
     def remove_voice(self, voice_id) -> None:
         self._check(self.http.delete(f"/api/voices/{voice_id}"))

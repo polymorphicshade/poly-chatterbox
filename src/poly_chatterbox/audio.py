@@ -80,6 +80,34 @@ def peak_normalize(wav: np.ndarray, peak: float = 0.95) -> np.ndarray:
     return (wav * (peak / m)).astype(np.float32)
 
 
+def process_windows(wav: np.ndarray, sr: int, fn, window_s: float = 15.0, overlap_s: float = 0.5) -> np.ndarray:
+    """Run ``fn`` (a same-length waveform -> waveform function) over long audio in overlapping windows.
+
+    The windows are cross-faded where they overlap, so models whose memory grows with the clip length can
+    clean minutes of audio without audible seams.
+    """
+    n, win, overlap = len(wav), int(window_s * sr), int(overlap_s * sr)
+    if n <= win:
+        return fn(wav).astype(np.float32)
+    step = win - overlap
+    out = np.zeros(n, dtype=np.float32)
+    weight = np.zeros(n, dtype=np.float32)
+    ramp = np.linspace(0.0, 1.0, overlap, dtype=np.float32)
+    for start in range(0, n, step):
+        end = min(start + win, n)
+        seg = fn(wav[start:end]).astype(np.float32)
+        w = np.ones(end - start, dtype=np.float32)
+        if start > 0:
+            w[:overlap] = ramp
+        if end < n:
+            w[-overlap:] = ramp[::-1]
+        out[start:end] += seg * w
+        weight[start:end] += w
+        if end == n:
+            break
+    return out / np.maximum(weight, 1e-8)
+
+
 def fingerprint(audio: Audio, *extra: object) -> str:
     wav, sr = audio
     h = hashlib.sha1(np.ascontiguousarray(wav).tobytes())

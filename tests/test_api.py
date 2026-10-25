@@ -230,3 +230,29 @@ def test_translate_on_the_fly(client):
 def test_web_ui_has_translation(client):
     js = client.get("/static/app.js").text
     assert "translate-now" in js and "/api/translate" in js
+
+
+def test_denoise(client):
+    res = client.post("/api/denoise", files={"audio": ("noisy.wav", make_wav(3), "audio/wav")})
+    assert_wav_any(res)
+    assert meta(res)["mode"] == "denoise" and meta(res)["duration"] == pytest.approx(3.0, abs=0.01)
+    assert client.post("/api/denoise").status_code == 422
+    assert client.post("/api/denoise", files={"audio": ("a.wav", b"junk", "audio/wav")}).status_code == 400
+
+
+def assert_wav_any(res):
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == "audio/wav"
+    data, _ = sf.read(io.BytesIO(res.content))
+    assert len(data) > 0
+
+
+def test_save_voice_with_denoise(client, engine):
+    res = client.post("/api/voices", data={"name": "Cleaned", "denoise": "true"}, files=ref())
+    assert res.status_code == 201
+    assert [c for c in engine.backend.calls if c[0] == "denoise"]
+
+
+def test_web_ui_has_denoise(client):
+    js = client.get("/static/app.js").text
+    assert "/api/denoise" in js and "data-denoise" in js

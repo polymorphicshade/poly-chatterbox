@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .. import audio as A
 from ..audio import Audio
 from .base import Backend, GenerationParams
 
@@ -60,6 +61,11 @@ class MockBackend(Backend):
     def translate(self, texts, source, target):
         self.calls.append(("translate", dict(texts=texts, source=source, target=target)))
         return [f"({target}) {t}" for t in texts]
+
+    def denoise(self, audio):
+        self.calls.append(("denoise", {}))
+        wav, sr = audio
+        return A.process_windows(wav, sr, lambda chunk: chunk * 0.5), sr  # "cleaner" = quieter, so tests can tell
 
     def detect_watermark(self, audio):
         self.calls.append(("detect_watermark", {}))

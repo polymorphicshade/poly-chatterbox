@@ -35,6 +35,7 @@ chatterbox = [
     "pykakasi==2.3.0",
     "pyloudnorm",
     "omegaconf",
+    "speechbrain>=1.0",  # speech enhancement: removes background noise from reference clips
 ]
 
 # Live voice conversion from a microphone to an audio device (`poly-chatterbox stream`).

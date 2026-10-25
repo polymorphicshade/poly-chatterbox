@@ -135,6 +135,9 @@ class Backend(ABC):
     def translate(self, texts: list[str], source: str, target: str) -> list[str]:
         """Translate each text from language code ``source`` to ``target`` (both in ``LANGUAGES``)."""
 
+    def denoise(self, audio: Audio) -> Audio:
+        """Speech enhancement: remove background noise from a recording and keep the voice."""
+
     @abstractmethod
     def detect_watermark(self, audio: Audio) -> float:
         """Perth watermark score: 1.0 for Chatterbox output, 0.0 for unwatermarked audio."""

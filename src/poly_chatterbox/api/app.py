@@ -148,6 +148,17 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         """Translate dialog between any two of the 23 supported languages (NLLB-200)."""
         return await run_in_threadpool(eng().translate, text, source, target)
 
+    @app.post("/api/denoise", tags=["voices"], response_class=Response, responses=WAV)
+    async def denoise(audio: UploadFile = File(..., description="Recording to clean (WAV/FLAC/OGG/MP3), e.g. a noisy reference clip.")):
+        """Remove background noise with an AI speech-enhancement model, keeping the speaker's voice.
+
+        Use it on a reference clip recorded in a noisy room, then clone from the cleaned result. The output is 16 kHz WAV.
+        """
+        clip = await _read_upload(audio, "Audio")
+        if clip is None:
+            raise HTTPException(400, "audio is empty.")
+        return _audio_response(await run_in_threadpool(eng().denoise, clip))
+
     @app.post("/api/watermark", tags=["meta"])
     async def watermark(audio: UploadFile = File(..., description="Audio to check (WAV/FLAC/OGG/MP3).")):
         """Detect the Perth watermark that Chatterbox embeds in all generated audio."""
@@ -192,12 +203,13 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         ref_audio: UploadFile = File(..., description="Clip of the voice, 5 s or longer."),
         language: Optional[str] = Form(None, description="Language spoken in the clip (code or name)."),
         description: Optional[str] = Form(None),
+        denoise: bool = Form(False, description="Remove background noise from the clip before saving it."),
     ):
         """Save a cloned voice to the library so it can be reused by id."""
         ref = await _read_upload(ref_audio)
         if ref is None:
             raise HTTPException(400, "ref_audio is empty.")
-        voice = await run_in_threadpool(eng().save_voice, name, ref, language, description)
+        voice = await run_in_threadpool(eng().save_voice, name, ref, language, description, denoise)
         return voice.to_dict()
 
     @app.delete("/api/voices/{voice_id}", tags=["voices"], status_code=204)

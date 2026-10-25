@@ -122,9 +122,29 @@ class Engine:
             text, lambda sentences: self.backend.translate(sentences, src, tgt), self.settings.max_chunk_chars)
         return {"text": out, "source": src, "target": tgt, "elapsed": round(time.perf_counter() - t0, 3)}
 
+    def denoise(self, audio: Audio) -> SynthesisResult:
+        """Remove background noise from a recording (e.g. a reference clip made in a noisy room), keeping the voice.
+
+        The model works at 16 kHz, so that is the result's sample rate; its loudness matches the input's.
+        """
+        wav, sr = audio
+        if not wav.size or float(np.max(np.abs(wav))) < 1e-3:
+            raise ValueError("The audio is silent: there is nothing to clean.")
+        t0 = time.perf_counter()
+        out, out_sr = self.backend.denoise(audio)
+        peak_in, peak_out = float(np.max(np.abs(wav))), float(np.max(np.abs(out))) if out.size else 0.0
+        if peak_out > 1e-6:
+            out = (out * min(peak_in / peak_out, 8.0)).astype(np.float32)  # back to the input level
+        return SynthesisResult(audio=out, sample_rate=out_sr, mode="denoise", elapsed=time.perf_counter() - t0,
+                               details={"model": self.settings.denoise_model, "source_duration": round(len(wav) / sr, 3)})
+
     def save_voice(self, name: str, ref_audio: Audio, language: Optional[str] = None,
-                   description: Optional[str] = None) -> Voice:
+                   description: Optional[str] = None, denoise: bool = False) -> Voice:
+        """Save a cloned voice. ``denoise``: remove background noise from the clip first."""
         lang = normalize_language(language, default="") if language and language.lower() != "auto" else ""
+        if denoise:
+            cleaned = self.denoise(ref_audio)
+            ref_audio = (cleaned.audio, cleaned.sample_rate)
         return self.library.add(name, self._prepare_reference(ref_audio, []), lang, description)
 
     def remove_voice(self, voice_id: str) -> None:

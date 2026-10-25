@@ -33,6 +33,9 @@ class Settings:
     # Hugging Face id of the NLLB-200 checkpoint that translates dialog (loaded on first use).
     translation_model: str = field(default_factory=lambda: _env("TRANSLATION_MODEL", "facebook/nllb-200-distilled-600M"))
 
+    # SpeechBrain speech-enhancement checkpoint that removes background noise from clips (loaded on first use).
+    denoise_model: str = field(default_factory=lambda: _env("DENOISE_MODEL", "speechbrain/sepformer-dns4-16k-enhancement"))
+
     # Where saved prompts live (default: <data dir>/prompts). Lets a deployment mount them on their own volume.
     prompts_path: str = field(default_factory=lambda: _env("PROMPTS_DIR", ""))
 
