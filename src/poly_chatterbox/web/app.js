@@ -11,6 +11,7 @@ const MODES = [
   { id: "vc", label: "Voice Conversion", hint: "Keep the words, timing and intonation of a recording but change the voice: upload or record speech, then pick the target voice." },
   { id: "watermark", label: "Watermark", hint: "Everything Chatterbox generates carries an imperceptible Perth watermark. Check whether a clip has one." },
   { id: "whisper", label: "Whisper", hint: "Speech to text with Whisper: upload or record audio and copy the transcript. The language is detected unless you pick one." },
+  { id: "speechtranslate", label: "Speech Translation", hint: "Translate a recording: it is transcribed, translated and spoken in another language, in the voice of your choice (or the original speaker's). For example English speech in, Japanese speech out in a cloned voice." },
   { id: "denoise", label: "Clean Audio", hint: "Remove background noise from a recording with an AI speech-enhancement model and keep the voice. Handy for a reference clip made in a noisy room: clean it, then use it to clone." },
 ];
 
@@ -21,9 +22,10 @@ const SAMPLE_TEXTS = {
 
 // Voice sources each TTS mode offers ("sample" = the multilingual language's own speaker).
 const VOICE_SOURCES = {
-  sample: "Language sample", builtin: "Built-in voice", library: "Library voice", upload: "Upload / record",
+  source: "Original speaker", sample: "Language sample", builtin: "Built-in voice", library: "Library voice", upload: "Upload / record",
 };
-const sourcesFor = (mode) => (mode === "multilingual" ? ["sample", "builtin", "library", "upload"] : ["builtin", "library", "upload"]);
+const sourcesFor = (mode) => (mode === "multilingual" ? ["sample", "builtin", "library", "upload"]
+  : mode === "speechtranslate" ? ["source", "sample", "library", "upload"] : ["builtin", "library", "upload"]);
 
 const app = {
   info: null,
@@ -362,6 +364,7 @@ function voiceField(ws, { label = "Voice", target = false } = {}) {
   const source = sources.includes(ws.voiceSource) ? ws.voiceSource : sources[0];
   const seg = (value) => `<button type="button" data-seg="voiceSource" data-value="${value}" class="${source === value ? "on" : ""}">${VOICE_SOURCES[value]}</button>`;
   let body = "";
+  if (source === "source") body = `<div class="help">Clones the speaker of the recording, so the translation sounds like them (needs 5 seconds or more of speech).</div>`;
   if (source === "sample") body = `<div class="help">A native ${esc(langName(ws.language))} speaker from the upstream demo (downloaded on first use).</div>`;
   if (source === "builtin") body = `<div class="help">The voice that ships with the model. No reference clip needed.</div>`;
   if (source === "library") body = voicePicker(ws);
@@ -476,6 +479,24 @@ function renderForm(ws) {
           ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.whisperLang ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
         </select><div class="help">Picking the language avoids mistakes on short or noisy clips.</div></div>`;
     submit = "Transcribe";
+  } else if (mode.id === "speechtranslate") {
+    const langs = Object.entries(app.info?.languages || {});
+    const versions = app.info?.multilingual_versions || { default: "v3", choices: ["v2", "v3"] };
+    html = audioField(ws, "source", "Recording to translate", "Upload or record the speech to translate.")
+      + `<div class="row"><div class="field"><label for="${ws.id}-from">Spoken in</label><select id="${ws.id}-from" data-k="whisperLang">
+          <option value="">Detect automatically</option>
+          ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.whisperLang ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
+        </select></div>
+        <div class="field"><label for="${ws.id}-to">Translate into</label><select id="${ws.id}-to" data-k="language">
+          ${langs.map(([code, name]) => `<option value="${code}" ${code === ws.language ? "selected" : ""}>${esc(name)} (${code})</option>`).join("")}
+        </select></div>
+        <div class="field"><label for="${ws.id}-ver">Model version</label><select id="${ws.id}-ver" data-k="version">
+          <option value="">Server default (${esc(versions.default)})</option>
+          ${versions.choices.map((v) => `<option value="${v}" ${ws.version === v ? "selected" : ""}>${v}</option>`).join("")}
+        </select></div></div>`
+      + voiceField(ws)
+      + `<div class="help">The recording is transcribed with Whisper, translated with NLLB-200 and spoken with Chatterbox Multilingual.</div>`;
+    submit = "Translate speech";
   } else if (mode.id === "denoise") {
     html = audioField(ws, "source", "Recording to clean", "Upload or record the audio with background noise.");
     submit = "Remove noise";
@@ -849,6 +870,10 @@ function appendVoice(ws, fd, { audioField, voiceField, target = false }) {
     fd.append(voiceField, "default");
     return "built-in voice";
   }
+  if (source === "source") {
+    fd.append("keep_voice", "true");
+    return "original speaker";
+  }
   return `${langName(ws.language)} sample`;
 }
 
@@ -872,6 +897,16 @@ function buildRequest(ws) {
   }
   if (!rt.files.source) throw new Error(mode.id === "vc" ? "Add the speech to convert (upload or record)." : mode.id === "whisper" ? "Add the audio to transcribe." : mode.id === "denoise" ? "Add the recording to clean (upload or record)." : "Add the audio to check.");
   fd.append(mode.id === "vc" ? "source_audio" : "audio", rt.files.source.file);
+  if (mode.id === "speechtranslate") {
+    fd.delete("audio");
+    fd.append("source_audio", rt.files.source.file);
+    fd.append("language", ws.language);
+    if (ws.whisperLang) fd.append("source_language", ws.whisperLang);
+    if (ws.version) fd.append("version", ws.version);
+    const voice = appendVoice(ws, fd, { audioField: "ref_audio", voiceField: "voice_id" });
+    return { url: "/api/translate/speech", init: { method: "POST", body: fd }, text: "",
+      label: `Translate · ${rt.files.source.file.name} → ${langName(ws.language)} · ${voice}` };
+  }
   if (mode.id === "whisper") {
     if (ws.whisperLang) fd.append("language", ws.whisperLang);
     return { url: "/api/transcribe", init: { method: "POST", body: fd }, label: `Whisper · ${rt.files.source.file.name}`, text: "", json: true };
@@ -957,6 +992,8 @@ function renderResults(ws) {
     return `<div class="result">${head(r)}
       <audio controls preload="metadata" src="${r.url}" ${i === 0 && !r.played ? "autoplay" : ""}></audio>
       <div class="meta"><span>${m.duration ?? "?"} s audio</span><span>${m.elapsed ?? "?"} s to generate</span>${m.model ? `<span>${esc(m.model)}</span>` : ""}${m.segments > 1 ? `<span>${m.segments} chunks</span>` : ""}</div>
+      ${m.transcript ? `<div class="spoken"><div><b>Heard${m.source_language ? " (" + esc(langName(m.source_language)) + ")" : ""}:</b> ${esc(m.transcript)}</div>
+        <div><b>Said (${esc(langName(m.language))}):</b> ${esc(m.translation)}</div></div>` : ""}
       ${(m.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
       <div class="links"><a href="${r.url}" download="${file}">Download WAV</a>
         ${m.mode === "denoise" ? `<button type="button" class="link" data-use-ref="${r.id}" title="Clone a voice from this cleaned clip">Use as reference clip</button>` : ""}</div></div>`;

@@ -129,7 +129,8 @@ class Backend(ABC):
     def transcribe(self, audio: Audio, language: Optional[str] = None) -> dict[str, Any]:
         """Speech to text with Whisper. ``language`` is a code or name (None: detect it).
 
-        Returns ``{"text": str, "segments": [{"start": float, "end": float, "text": str}, ...]}``.
+        Returns ``{"text": str, "segments": [{"start": float, "end": float, "text": str}, ...]}`` and, when
+        ``language`` was not given, ``"language"``: the detected language code if it is one of ``LANGUAGES``.
         """
 
     def translate(self, texts: list[str], source: str, target: str) -> list[str]:

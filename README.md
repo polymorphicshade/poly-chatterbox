@@ -13,6 +13,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Dialog translation, on the fly or on its own | "Translate from" in every TTS mode | `POST /api/translate`, `translate_from` on each TTS endpoint | `poly-chatterbox translate`, `--translate-from` |
 
 | Background-noise removal for reference clips (AI speech enhancement) | Clean Audio, and "Remove background noise" on a reference clip | `POST /api/denoise`, `denoise` on `POST /api/voices` | `poly-chatterbox denoise`, `voices add --denoise` |
+| Translate a recording (speech in, translated speech out) | Speech Translation | `POST /api/translate/speech` | `poly-chatterbox translate-speech` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
 | Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
@@ -304,7 +305,22 @@ poly-chatterbox multilingual "Good morning, everyone. [pause 400ms] Let's begin.
 curl -X POST localhost:8000/api/tts/multilingual -F text="Good morning" -F language=ja -F translate_from=en -F voice_id=me -o ja.wav
 ```
 
-Translation needs the target to be one of the 23 languages. To translate a *recording* (speech in, translated speech out), transcribe it first (the Whisper mode or `poly-chatterbox transcribe`), translate the text, then speak it.
+Translation needs the target to be one of the 23 languages.
+
+### Translating recordings
+
+Speech Translation chains the three models: Whisper transcribes the recording, NLLB-200 translates the words, and Chatterbox Multilingual speaks them. Choose the voice it speaks with: a library voice, an uploaded clip, the language's sample speaker, or *Original speaker*, which clones the voice of the recording itself so the translation sounds like them. The result shows what was heard and what was said.
+
+* **Web UI:** the *Speech Translation* mode. *Spoken in* is detected unless you set it, which helps with short or noisy clips.
+* **API:** `POST /api/translate/speech` with `source_audio`, `language` (the language to speak), and optionally `source_language`, one of `ref_audio` / `voice_id` / `keep_voice=true`, `version`, `generation` and `preset`. It returns `audio/wav`; the metadata has `source_language`, `transcript` and `translation` (each cut to 400 characters, since it travels in a header; use `POST /api/transcribe` and `POST /api/translate` for the full text).
+* **CLI:** `poly-chatterbox translate-speech talk.wav -l ja [--source-language en] [--voice ID | --ref-audio clip.wav | --keep-voice]`, which also prints what was heard and said.
+
+```sh
+poly-chatterbox translate-speech talk.wav -l ja --voice me -o talk_ja.wav
+curl -X POST localhost:8000/api/translate/speech -F source_audio=@talk.wav -F language=ja -F keep_voice=true -o talk_ja.wav
+```
+
+It speaks the whole recording as one passage: pauses and the original timing and intonation are not carried over (voice conversion keeps those, but can't change the language). For a noisy recording, clean it first with `denoise`.
 
 ## Cleaning noisy reference clips
 

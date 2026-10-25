@@ -256,3 +256,28 @@ def test_save_voice_with_denoise(client, engine):
 def test_web_ui_has_denoise(client):
     js = client.get("/static/app.js").text
     assert "/api/denoise" in js and "data-denoise" in js
+
+
+def test_translate_speech(client):
+    src = {"source_audio": ("talk.wav", make_wav(6), "audio/wav")}
+    res = client.post("/api/translate/speech", data={"language": "ja", "source_language": "en"}, files=src)
+    assert_wav(res)
+    m = meta(res)
+    assert m["mode"] == "translate_speech" and m["language"] == "ja" and m["translation"].startswith("(ja) ")
+    res = client.post("/api/translate/speech", data={"language": "fr", "source_language": "en", "keep_voice": "true"},
+                      files=src)
+    assert_wav(res)
+    assert meta(res)["voice"] == "source"
+    res = client.post("/api/translate/speech", data={"language": "fr", "source_language": "en", "preset": "calm"},
+                      files={**src, **ref()})
+    assert_wav(res)
+    assert meta(res)["voice"] == "upload" and meta(res)["preset"] == "calm"
+    # The mock can't detect a language, so without source_language there is nothing to translate from.
+    assert client.post("/api/translate/speech", data={"language": "fr"}, files=src).status_code == 400
+    assert client.post("/api/translate/speech", data={"language": "xx", "source_language": "en"}, files=src).status_code == 400
+    assert client.post("/api/translate/speech", data={"language": "fr"}).status_code == 422
+
+
+def test_web_ui_has_speech_translation(client):
+    js = client.get("/static/app.js").text
+    assert "speechtranslate" in js and "/api/translate/speech" in js

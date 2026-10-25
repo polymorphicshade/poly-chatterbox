@@ -279,3 +279,31 @@ def test_save_voice_denoised(engine):
     engine.save_voice("Quiet", load_audio(make_wav(6)))
     assert engine.backend.calls[-1][0] == "denoise"  # not called again for the second voice
     assert len([c for c in engine.backend.calls if c[0] == "denoise"]) == 1
+
+
+def test_translate_speech(engine):
+    source = load_audio(make_wav(6))
+    res = engine.translate_speech(source, "Japanese", "English")
+    assert res.mode == "translate_speech" and res.language == "ja" and res.voice == "sample_ja"
+    assert res.details["source_language"] == "en" and res.details["transcript"].startswith("Placeholder transcript")
+    assert res.details["translation"] == "(ja) " + res.details["transcript"]
+    assert last_call(engine, "translate")["source"] == "en" and last_call(engine, "synthesize")["language"] == "ja"
+    # Voices: a clip, a library voice, or the speaker of the recording itself.
+    assert engine.translate_speech(source, "fr", "en", ref_audio=load_audio(make_wav(6))).voice == "upload"
+    assert engine.translate_speech(source, "fr", "en", voice_id="podcast").voice == "podcast"
+    kept = engine.translate_speech(source, "fr", "en", keep_voice=True)
+    assert kept.voice == "source" and last_call(engine, "synthesize")["voice"] is True
+    with pytest.raises(ValueError, match="at most one"):
+        engine.translate_speech(source, "fr", "en", voice_id="podcast", keep_voice=True)
+    with pytest.raises(ValueError, match="at least"):  # 2 s of speech is too short to clone
+        engine.translate_speech(source, "fr", "en", ref_audio=load_audio(make_wav(2)))
+
+
+def test_translate_speech_detects_the_language(engine, monkeypatch):
+    source = load_audio(make_wav(6))
+    with pytest.raises(ValueError, match="set source_language"):
+        engine.translate_speech(source, "fr")
+    real = engine.backend.transcribe
+    monkeypatch.setattr(engine.backend, "transcribe", lambda audio, language=None: {**real(audio, language), "language": "de"})
+    res = engine.translate_speech(source, "fr")
+    assert res.details["source_language"] == "de" and last_call(engine, "translate")["source"] == "de"

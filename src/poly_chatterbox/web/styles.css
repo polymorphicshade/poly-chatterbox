@@ -158,6 +158,7 @@ textarea[readonly] { opacity: .7; }
 .result .links { display: flex; gap: 12px; margin-top: 6px; }
 .result .links a { font-size: 12px; color: var(--accent); }
 .result textarea.transcript { margin-top: 6px; min-height: 120px; }
+.result .spoken { font-size: 12px; margin-top: 6px; display: grid; gap: 2px; }
 .result.pending { opacity: .7; }
 .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }

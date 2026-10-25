@@ -17,6 +17,7 @@ import numpy as np
 from .. import audio as A
 from ..audio import Audio
 from ..config import Settings
+from ..languages import normalize_language
 from .base import MULTILINGUAL, NANO, ORIGINAL, TURBO, Backend, BackendError, GenerationParams
 
 log = logging.getLogger(__name__)
@@ -251,14 +252,21 @@ class ChatterboxBackend(Backend):
         with self._lock:
             pipe = self.aux_model(WHISPER, load)
             out = pipe({"raw": np.ascontiguousarray(wav, dtype=np.float32), "sampling_rate": 16000},
-                       chunk_length_s=30, return_timestamps=True, generate_kwargs=generate_kwargs)
+                       chunk_length_s=30, return_timestamps=True, return_language=True,
+                       generate_kwargs=generate_kwargs)
         total = len(audio[0]) / audio[1]
         segments = []
+        detected = None  # Whisper's guess for the first chunk, if it is one of our languages
         for chunk in out.get("chunks") or []:
+            if detected is None and chunk.get("language"):
+                try:
+                    detected = normalize_language(chunk["language"])
+                except ValueError:
+                    pass
             start, end = chunk.get("timestamp") or (None, None)
             segments.append({"start": round(float(start or 0.0), 2), "end": round(float(end if end is not None else total), 2),
                              "text": chunk["text"].strip()})
-        return {"text": out["text"].strip(), "segments": segments}
+        return {"text": out["text"].strip(), "segments": segments, "language": detected}
 
     def translate(self, texts, source, target):
         import torch

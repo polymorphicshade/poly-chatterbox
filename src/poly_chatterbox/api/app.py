@@ -159,6 +159,28 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
             raise HTTPException(400, "audio is empty.")
         return _audio_response(await run_in_threadpool(eng().denoise, clip))
 
+    @app.post("/api/translate/speech", tags=["tts"], response_class=Response, responses=WAV)
+    async def translate_speech(
+        source_audio: UploadFile = File(..., description="The recording to translate (WAV/FLAC/OGG/MP3)."),
+        language: str = Form(..., description="Language to speak: a code (ja) or name (Japanese)."),
+        source_language: Optional[str] = Form(None, description="Language of the recording. Default: detected."),
+        ref_audio: Optional[UploadFile] = REF_AUDIO,
+        voice_id: Optional[str] = Form(None, description="Or a library voice. With none of the voice options, the language's sample speaker."),
+        keep_voice: bool = Form(False, description="Speak in the voice of the recording itself (needs 5 s or more of speech)."),
+        version: Optional[str] = Form(None, description="Multilingual checkpoint: v3 (recommended) or v2."),
+        generation: Optional[str] = GENERATION,
+        preset: Optional[str] = PRESET,
+    ):
+        """Speech to translated speech: transcribe the recording (Whisper), translate it (NLLB-200) and speak it in
+        another language with Chatterbox Multilingual. The result metadata has the `transcript` and the `translation`."""
+        source = await _read_upload(source_audio, "Source audio")
+        if source is None:
+            raise HTTPException(400, "source_audio is empty.")
+        ref, gen = await _read_upload(ref_audio), _generation_form(generation)
+        result = await run_in_threadpool(eng().translate_speech, source, language, source_language or None, ref,
+                                         voice_id or None, keep_voice, version or None, params(gen), preset or None)
+        return _audio_response(result)
+
     @app.post("/api/watermark", tags=["meta"])
     async def watermark(audio: UploadFile = File(..., description="Audio to check (WAV/FLAC/OGG/MP3).")):
         """Detect the Perth watermark that Chatterbox embeds in all generated audio."""

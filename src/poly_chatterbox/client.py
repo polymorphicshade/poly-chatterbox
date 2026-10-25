@@ -51,6 +51,12 @@ class LocalClient:
     def translate(self, text, source, target) -> dict:
         return self.engine.translate(text, source, target)
 
+    def translate_speech(self, source_audio: Path, language, source_language=None, ref_audio: Optional[Path] = None,
+                         voice_id=None, keep_voice=False, version=None, generation=None, preset=None) -> Result:
+        return self._out(self.engine.translate_speech(load_audio(source_audio), language, source_language,
+                                                      _load(ref_audio), voice_id, keep_voice, version,
+                                                      self._params(generation), preset))
+
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._out(self.engine.convert(load_audio(source_audio), _load(target_audio), target_voice_id))
 
@@ -160,6 +166,13 @@ class HttpClient:
 
     def translate(self, text, source, target) -> dict:
         return self._check(self.http.post("/api/translate", data=dict(text=text, source=source, target=target))).json()
+
+    def translate_speech(self, source_audio: Path, language, source_language=None, ref_audio: Optional[Path] = None,
+                         voice_id=None, keep_voice=False, version=None, generation=None, preset=None) -> Result:
+        return self._post_form("/api/translate/speech",
+                               dict(language=language, source_language=source_language, voice_id=voice_id,
+                                    keep_voice="true" if keep_voice else None, version=version, generation=generation,
+                                    preset=preset), source_audio=source_audio, ref_audio=ref_audio)
 
     def convert(self, source_audio: Path, target_audio: Optional[Path] = None, target_voice_id=None) -> Result:
         return self._post_form("/api/vc", dict(target_voice_id=target_voice_id),

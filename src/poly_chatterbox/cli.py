@@ -78,6 +78,10 @@ def _add_tts(p: argparse.ArgumentParser, models: tuple[str, ...]) -> None:
     voice.add_argument("--voice", help="Library voice id (see `poly-chatterbox voices list`).")
     _add_output(p)
     g = p.add_argument_group("generation options", "Unset options use the model defaults.")
+    _add_generation_options(g, models)
+
+
+def _add_generation_options(g, models: tuple[str, ...]) -> None:
     for name, opt in GENERATION_OPTIONS.items():
         defaults = {m: opt["defaults"][m] for m in models if m in opt["defaults"]}
         if not defaults:
@@ -177,6 +181,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--to", dest="target", required=True, metavar="LANG", help="Language to translate into, code or name.")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
 
+    p = sub.add_parser("translate-speech", help="Translate a recording: transcribe it, translate it and speak it in another "
+                                                "language (Whisper + NLLB + Chatterbox Multilingual).")
+    p.add_argument("source", type=Path, help="Recording to translate (WAV/FLAC/OGG/MP3).")
+    p.add_argument("-l", "--language", required=True, help=f"Language to speak, code or name ({', '.join(LANGUAGES)}).")
+    p.add_argument("--source-language", metavar="LANG", help="Language of the recording (default: detected).")
+    p.add_argument("--model-version", choices=MULTILINGUAL_VERSIONS, help="Multilingual checkpoint.")
+    p.add_argument("--emotion", choices=list(EMOTION_PRESETS), metavar="PRESET", help="Emotion preset, see `presets`.")
+    voice = p.add_mutually_exclusive_group()
+    voice.add_argument("--ref-audio", type=Path, help="Reference clip of the voice to speak with, >= 5 s.")
+    voice.add_argument("--voice", help="Library voice id to speak with (default: the language's sample speaker).")
+    voice.add_argument("--keep-voice", action="store_true", help="Speak in the voice of the recording itself (>= 5 s of speech).")
+    _add_output(p)
+    g = p.add_argument_group("generation options", "Unset options use the model defaults.")
+    _add_generation_options(g, (MULTILINGUAL,))
+
     p = sub.add_parser("denoise", help="Remove background noise from a recording (e.g. a reference clip) with an AI model.")
     p.add_argument("audio", type=Path, help="Recording to clean (WAV/FLAC/OGG/MP3).")
     _add_output(p)
@@ -274,6 +293,14 @@ def run(args) -> int:
     if cmd == "translate":
         result = client.translate(_read_text(args), args.source, args.target)
         print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
+        return 0
+    if cmd == "translate-speech":
+        wav, meta = client.translate_speech(args.source, args.language, args.source_language, args.ref_audio, args.voice,
+                                            args.keep_voice, args.model_version, _generation(args), args.emotion)
+        _write_output(args, wav, meta)
+        if not args.json:
+            print(f"heard ({meta.get('source_language')}): {meta.get('transcript')}\n"
+                  f"said  ({meta.get('language')}): {meta.get('translation')}", file=sys.stderr)
         return 0
     if cmd == "denoise":
         wav, meta = client.denoise(args.audio)

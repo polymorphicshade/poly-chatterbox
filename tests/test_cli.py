@@ -137,3 +137,16 @@ def test_denoise(engine, tmp_path, ref_wav, capsys):
     code, stdout, _ = run(capsys, "voices", "add", "Clean Me", "--ref-audio", str(ref_wav), "--denoise")
     assert code == 0 and stdout.strip() == "clean_me"
     assert engine.backend.calls[-1][0] == "denoise"
+
+
+def test_translate_speech(engine, tmp_path, ref_wav, capsys):
+    out = tmp_path / "ja.wav"
+    code, stdout, err = run(capsys, "translate-speech", str(ref_wav), "-l", "ja", "--source-language", "en",
+                            "--keep-voice", "--emotion", "calm", "-o", str(out))
+    assert code == 0 and out.is_file(), err
+    assert "heard (en): Placeholder transcript" in err and "said  (ja): (ja) Placeholder" in err
+    code, stdout, _ = run(capsys, "translate-speech", str(ref_wav), "-l", "fr", "--source-language", "en",
+                          "--voice", "podcast", "--temperature", "0.5", "-o", str(out), "--json")
+    assert json.loads(stdout)["voice"] == "podcast"
+    code, _, err = run(capsys, "translate-speech", str(ref_wav), "-l", "fr", "-o", str(out))
+    assert code == 2 and "source_language" in err

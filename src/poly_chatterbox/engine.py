@@ -183,8 +183,39 @@ class Engine:
             language = normalize_language(language)  # Whisper takes the same ISO codes
         t0 = time.perf_counter()
         out = self.backend.transcribe(audio, language)
-        return {**out, "language": language, "duration": round(len(wav) / sr, 3),
+        return {**out, "language": language or out.get("language"), "duration": round(len(wav) / sr, 3),
                 "elapsed": round(time.perf_counter() - t0, 3)}
+
+    def translate_speech(self, source: Audio, language: str, source_language: Optional[str] = None,
+                         ref_audio: Optional[Audio] = None, voice_id: Optional[str] = None, keep_voice: bool = False,
+                         version: Optional[str] = None, params: Optional[GenerationParams] = None,
+                         preset: Optional[str] = None) -> SynthesisResult:
+        """Translate a recording: transcribe it, translate the words and speak them in ``language``.
+
+        The voice is a reference clip, a library voice, or with ``keep_voice`` the speaker of the recording
+        itself; with none of these the language's sample speaker talks. ``source_language`` is detected when unset.
+        """
+        if sum([ref_audio is not None, bool(voice_id), keep_voice]) > 1:
+            raise ValueError("Give at most one of ref_audio, voice_id or keep_voice.")
+        target = normalize_language(language)
+        t0 = time.perf_counter()
+        heard = self.transcribe(source, source_language)
+        text = heard["text"].strip()
+        if not text:
+            raise ValueError("No speech was found in the recording.")
+        spoken_from = heard["language"]
+        if not spoken_from:
+            raise ValueError("Could not tell which language the recording is in: set source_language.")
+        translated = self.translate(text, spoken_from, target)["text"]
+        result = self.multilingual(translated, target, source if keep_voice else ref_audio, voice_id, version, params, preset)
+        result.mode = "translate_speech"
+        result.elapsed = time.perf_counter() - t0
+        if keep_voice:
+            result.voice = "source"
+        clip = lambda s: s if len(s) <= 400 else s[:399] + "…"  # the metadata travels in an HTTP header
+        result.details.update({"source_language": spoken_from, "transcript": clip(text), "translation": clip(translated),
+                               "source_duration": heard["duration"]})
+        return result
 
     def detect_watermark(self, audio: Audio) -> dict[str, Any]:
         """Look for the Perth watermark that Chatterbox embeds in everything it generates."""
