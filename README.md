@@ -288,3 +288,10 @@ Layout: `src/poly_chatterbox/` contains `engine.py` (the feature logic), `backen
 ## Disclaimer
 
 Don't use this to do bad things: clone only voices you have permission to use.
+
+# Scratchpad
+```powershell
+uv run poly-chatterbox voices add "Target" --ref-audio C:\some\path\margot_robbie_ex.mp3 -l en
+
+uv run poly-chatterbox stream --input "Shure" --output "CABLE Input" --voice target
+```
