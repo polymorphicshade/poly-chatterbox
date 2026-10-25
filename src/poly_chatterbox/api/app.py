@@ -30,7 +30,9 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 METADATA_HEADER = "X-TTS-Metadata"
 WAV = {200: {"content": {"audio/wav": {}}}}
 
-TEXT = Form(..., description="Text to speak. Long text is split at sentences; [pause 500ms] inserts silence.")
+TEXT = Form(..., description="Text to speak. Long text is split at sentences. Markup: [pause 500ms] inserts silence; "
+                             "[settings exaggeration=0.9]…[/settings] and [voice: sample_de]…[/voice] change the "
+                             "generation options or voice for just that span.")
 REF_AUDIO = File(None, description="Reference clip of the voice to clone, 5 s or longer (WAV/FLAC/OGG/MP3).")
 VOICE_ID = Form(None, description="Or a library voice (see GET /api/voices). Neither: the model's built-in voice.")
 GENERATION = Form(None, description="GenerationOptions (see Schemas) as JSON, e.g. {\"temperature\": 0.7, \"seed\": 1}.")

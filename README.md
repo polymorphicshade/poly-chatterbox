@@ -84,6 +84,10 @@ Tips from upstream:
 ## Text
 
 * `[pause]` inserts 0.5 s of silence. `[pause 800ms]`, `[pause 1.5s]` and `[pause 2]` set an explicit length. Other bracketed text (such as Turbo's tags) goes to the model unchanged.
+* `[settings name=value …]…[/settings]` gives just that span its own [generation options](#generation-options), for example `Calm. [settings exaggeration=0.9 cfg_weight=0.3]I can't believe it![/settings] Anyway…`. Options you don't name keep the request's values, and `seed` can't be set per span.
+* `[voice: id]…[/voice]` has a library voice (see `poly-chatterbox voices list`, or `default` for the built-in voice) speak just that span. The voice uploaded or chosen for the request speaks everything else.
+* Spans can be nested and mixed; inner `[settings]` add to or override outer ones. They work in every TTS mode through the API and CLI, since they are part of the text. Options a model doesn't use are ignored with a warning, as usual.
+* In the web UI, change some sliders or generation options, highlight text and click **Wrap selection in settings** to wrap it with your changed values. Pick a voice next to **Wrap selection in voice** to do the same for a voice. With nothing highlighted, an empty pair is inserted at the cursor.
 * One Chatterbox call produces at most about 40 seconds of audio, so longer text is split at sentence boundaries (then clauses, then words) into chunks of at most `POLY_CHATTERBOX_MAX_CHUNK_CHARS` characters and joined back together.
 
 ## Voice library

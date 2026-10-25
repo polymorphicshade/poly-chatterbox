@@ -112,3 +112,52 @@ def test_seed_is_deterministic(engine):
 
 def test_watermark(engine):
     assert engine.detect_watermark(load_audio(make_wav(2))) == {"score": 0.0, "watermarked": False}
+
+
+def synth_calls(engine):
+    return [c[1] for c in engine.backend.calls if c[0] == "synthesize"]
+
+
+def test_settings_span_changes_params_per_span(engine):
+    r = engine.original("Calm. [settings exaggeration=0.9 cfg_weight=0.3]Wow![/settings] Calm again.",
+                        params=GenerationParams(temperature=0.6, seed=4))
+    calls = synth_calls(engine)
+    assert len(calls) == 2 and r.segments == 3
+    plain = next(c for c in calls if c["texts"] == ["Calm.", "Calm again."])
+    span = next(c for c in calls if c["texts"] == ["Wow!"])
+    assert plain["params"].exaggeration is None and plain["params"].temperature == 0.6
+    assert (span["params"].exaggeration, span["params"].cfg_weight) == (0.9, 0.3)
+    assert span["params"].temperature == 0.6 and span["params"].seed == 4  # request options carry over
+
+
+def test_span_order_is_preserved(engine):
+    plain = engine.original("Aaa bbb. Ccc ddd. Eee fff.", params=GenerationParams(seed=1))
+    spanned = engine.original("Aaa bbb. [settings temperature=0.8]Ccc ddd.[/settings] Eee fff.", params=GenerationParams(seed=1))
+    assert spanned.segments == 3 and abs(spanned.duration - plain.duration) < 0.2
+
+
+def test_voice_span_switches_voice(engine):
+    r = engine.multilingual("Bonjour. [voice: sample_de]Guten Tag.[/voice] Au revoir.", "fr", params=GenerationParams(cfg_weight=0))
+    assert r.voice == "sample_fr" and r.details["voices"] == ["sample_fr", "sample_de"]
+    assert [c["texts"] for c in synth_calls(engine)] == [["Bonjour.", "Au revoir."], ["Guten Tag."]]
+    assert not r.warnings
+    r = engine.turbo("Hi [voice: default]there[/voice]", voice_id="podcast")
+    assert r.details["voices"] == ["podcast", "default"] and not synth_calls(engine)[-1]["voice"]
+
+
+def test_span_voice_unknown_fails_before_generating(engine):
+    with pytest.raises(LookupError):
+        engine.turbo("Hi [voice: ghost]there[/voice]")
+    assert not synth_calls(engine)
+
+
+def test_span_voice_accent_warning(engine):
+    r = engine.multilingual("Bonjour [voice: sample_de]Guten Tag[/voice]", "fr")
+    assert sum("accent" in w for w in r.warnings) == 1
+    r = engine.multilingual("Bonjour [voice: sample_de][settings cfg_weight=0]Guten Tag[/settings][/voice]", "fr")
+    assert not r.warnings
+
+
+def test_span_options_unsupported_by_model_warn_once(engine):
+    r = engine.turbo("[settings exaggeration=0.9]a[/settings] b [settings cfg_weight=0.2 top_k=50]c[/settings]")
+    assert r.warnings == ["Chatterbox-Turbo ignores exaggeration, cfg_weight."]

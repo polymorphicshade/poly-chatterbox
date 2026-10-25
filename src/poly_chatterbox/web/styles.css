@@ -174,3 +174,8 @@ textarea[readonly] { opacity: .7; }
 .chip.tag { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .result .score { font-size: 22px; font-weight: 700; margin: 6px 0 2px; }
 .result .score.yes { color: var(--accent); }
+.markup-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.markup-tools select { width: auto; max-width: 220px; }
+.markup-tools .sep { flex: 0 0 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+.btn.small { padding: 3px 10px; font-size: 12px; }
+.settings-preview code { word-break: break-all; }

@@ -117,3 +117,19 @@ def test_generation_option_descriptions(client):
         assert opt["label"] and len(opt["description"]) > 40 and opt["defaults"]
     schema = client.get("/openapi.json").json()["components"]["schemas"]["GenerationOptions"]["properties"]
     assert "Defaults: original 1.0, multilingual 1.0, turbo 0.95, nano 0.95." in schema["top_p"]["description"]
+
+
+def test_markup_spans_via_api(client):
+    res = client.post("/api/tts/multilingual", data={
+        "text": "Bonjour [settings cfg_weight=0 temperature=0.6][voice: sample_de]Guten Tag[/voice][/settings]",
+        "language": "fr"})
+    assert_wav(res)
+    assert meta(res)["voices"] == ["sample_fr", "sample_de"]
+    bad = client.post("/api/tts/original", data={"text": "[settings exaggeration=9]x[/settings]"})
+    assert bad.status_code == 400 and "out of range" in bad.json()["detail"]
+    assert client.post("/api/tts/turbo", data={"text": "[voice: ghost]x[/voice]"}).status_code == 404
+
+
+def test_web_ui_has_wrap_buttons(client):
+    js = client.get("/static/app.js").text
+    assert "wrap-settings" in js and "wrap-voice" in js

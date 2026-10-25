@@ -50,7 +50,7 @@ function newWorkspace(name) {
   return {
     id: uid(), name: name || `Workspace ${app.workspaces.length + 1}`, mode: "turbo",
     text: SAMPLE_TEXTS.turbo, language: "fr", version: "",
-    voiceSource: "builtin", voiceId: "podcast", saveName: "",
+    voiceSource: "builtin", voiceId: "podcast", wrapVoice: "", saveName: "",
     voiceFilter: { q: "", kind: "" }, gen: {},
   };
 }
@@ -217,8 +217,55 @@ function textField(ws, model) {
     <textarea id="${ws.id}-text" class="main-text" data-k="text" placeholder="What should be said?">${esc(ws.text)}</textarea>
     ${tags ? `<div class="chips" aria-label="Insert a paralinguistic tag">${(app.info?.event_tags || []).map((t) =>
       `<button type="button" class="chip tag" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
+    <div class="markup-tools">
+      <button type="button" class="btn small" data-action="wrap-settings" title="Wraps the highlighted text so only it uses your changed generation settings">Wrap selection in settings</button>
+      <span class="sep"></span>
+      <select data-k="wrapVoice" aria-label="Voice for the selection">${voiceOptions(ws.wrapVoice || ws.voiceId)}</select>
+      <button type="button" class="btn small" data-action="wrap-voice" title="Wraps the highlighted text so only it is spoken by the chosen voice">Wrap selection in voice</button>
+    </div>
+    <div class="help settings-preview">${settingsPreview(ws)}</div>
     <div class="help"><code>[pause 800ms]</code> inserts silence. Text longer than ${max} characters is split at sentences and joined.
-      ${tags ? "Click a tag to insert it at the cursor." : ""}</div></div>`;
+      ${tags ? "Click a tag to insert it at the cursor. " : ""}Highlight some text and use the buttons above to give just that part
+      its own generation settings (<code>[settings …]…[/settings]</code>) or voice (<code>[voice: id]…[/voice]</code>).</div></div>`;
+}
+
+// All voices as <option>s (value = voice id) for the "wrap selection in voice" picker.
+function voiceOptions(selected) {
+  return app.voices.map((v) => `<option value="${esc(v.id)}" ${v.id === selected ? "selected" : ""}>${esc(v.name)}${v.language ? " — " + esc(langName(v.language)) : ""}</option>`).join("");
+}
+
+// The opening [settings …] tag for the generation options the user has changed in this mode ("" if none).
+function settingsTag(ws) {
+  const g = ws.gen[ws.mode] || {};
+  const parts = genOptions(modeOf(ws).model)
+    .filter(([k]) => k !== "seed" && g[k] != null && g[k] !== "" && !Number.isNaN(g[k]))
+    .map(([k]) => `${k}=${g[k]}`);
+  return parts.length ? `[settings ${parts.join(" ")}]` : "";
+}
+
+function settingsPreview(ws) {
+  const tag = settingsTag(ws);
+  return tag ? `Settings block you have set up: <code>${esc(tag)}</code>`
+    : "Change a slider or a Generation option below, then wrap the text that should use it. (The seed can't be set per span.)";
+}
+
+// Wrap the highlighted text of the text box in open/close markup (with no selection: an empty pair
+// at the cursor). Whitespace at the edges of the selection stays outside the tags.
+function wrapSelection(ws, form, open, close) {
+  const area = form.querySelector("textarea[data-k='text']");
+  const text = area.value;
+  let start = area.selectionStart ?? text.length, end = area.selectionEnd ?? text.length;
+  const sel = text.slice(start, end);
+  start += sel.length - sel.trimStart().length;
+  end -= sel.length - sel.trimEnd().length;
+  if (end < start) end = start;
+  ws.text = text.slice(0, start) + open + text.slice(start, end) + close + text.slice(end);
+  save();
+  renderForm(ws);
+  const again = form.querySelector("textarea[data-k='text']");
+  const pos = end === start ? start + open.length : end + open.length + close.length;
+  again.focus();
+  again.setSelectionRange(pos, pos);
 }
 
 function languageField(ws) {
@@ -383,6 +430,10 @@ function bindForm(ws, form) {
       if (input.hasAttribute("data-bool")) value = value === "" ? null : value === "true";
       setPath(ws, key, value);
       if (input.hasAttribute("data-slider")) input.closest(".slider").querySelector("output").textContent = input.value;
+      if (key.startsWith("gen.")) {
+        const preview = form.querySelector(".settings-preview");
+        if (preview) preview.innerHTML = settingsPreview(ws);
+      }
       save();
       if (input.tagName === "SELECT" && ["voiceId", "language"].includes(key)) renderForm(ws);
     };
@@ -414,6 +465,18 @@ function bindForm(ws, form) {
     ws.gen[ws.mode] = {};
     save();
     renderForm(ws);
+  });
+  form.querySelector("[data-action='wrap-settings']")?.addEventListener("click", () => {
+    const tag = settingsTag(ws);
+    if (!tag) return showError(ws, "Change a slider or a Generation option first; the wrapped text will use those settings.");
+    showError(ws, "");
+    wrapSelection(ws, form, tag, "[/settings]");
+  });
+  form.querySelector("[data-action='wrap-voice']")?.addEventListener("click", () => {
+    const id = ws.wrapVoice || ws.voiceId || app.voices[0]?.id;
+    if (!id) return showError(ws, "Pick a voice for the selection first.");
+    showError(ws, "");
+    wrapSelection(ws, form, `[voice: ${id}]`, "[/voice]");
   });
   form.querySelector("[data-action='save-voice']")?.addEventListener("click", () => saveVoice(ws));
   form.querySelector("[data-action='delete-voice']")?.addEventListener("click", () => deleteVoice(ws));

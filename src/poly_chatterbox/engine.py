@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from dataclasses import dataclass, field, replace
+from typing import Any, Optional
 
 import numpy as np
 
@@ -19,7 +19,7 @@ from .backends import (MULTILINGUAL, MULTILINGUAL_VERSIONS, NANO, ORIGINAL, TURB
 from .config import Settings, get_settings
 from .languages import LANGUAGES, SAMPLES, normalize_language
 from .library import DEFAULT_VOICE, Voice, VoiceLibrary
-from .text import Segment, parse_markup
+from .text import parse_markup
 
 MODEL_LABELS = {ORIGINAL: "Chatterbox", TURBO: "Chatterbox-Turbo", NANO: "Chatterbox-Nano", MULTILINGUAL: "Chatterbox Multilingual"}
 
@@ -81,14 +81,7 @@ class Engine:
         if ref_audio is None and not voice_id and lang in SAMPLES:
             voice_id = f"sample_{lang}"
         p = params or GenerationParams()
-        result = self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version)
-        voice = self.library.get(voice_id) if voice_id else None
-        cfg = p.cfg_weight if p.cfg_weight is not None else 0.5
-        if voice and voice.language and voice.language != lang and cfg > 0:
-            result.warnings.append(
-                f"The reference speaks {LANGUAGES.get(voice.language, voice.language)} but the text is "
-                f"{LANGUAGES[lang]}, so the output may carry its accent. Set CFG / pace to 0 to avoid that.")
-        return result
+        return self._tts(MULTILINGUAL, text, ref_audio, voice_id, p, language=lang, version=version)
 
     def convert(self, source: Audio, target_audio: Optional[Audio] = None,
                 target_voice_id: Optional[str] = None) -> SynthesisResult:
@@ -133,23 +126,56 @@ class Engine:
             raise ValueError("Give at most one of ref_audio or voice_id.")
         segments = parse_markup(text, self.settings.max_chunk_chars)
         warnings: list[str] = []
-        if ignored := params.unsupported(model):
-            warnings.append(f"{MODEL_LABELS[model]} ignores {', '.join(ignored)}.")
         voice, label = self._voice(ref_audio, voice_id, warnings)
+
+        # [settings] and [voice] spans split the text into runs that share a voice and options. Resolve
+        # everything up front so a bad voice id fails before any audio is generated.
+        runs: dict[tuple, list[int]] = {}
+        for i, seg in enumerate(segments):
+            if seg.text:
+                runs.setdefault((seg.voice, seg.settings), []).append(i)
+        voices: dict[Optional[str], tuple[Optional[Audio], str]] = {None: (voice, label)}
+        ignored: dict[str, None] = {}
+        accent_checked: set[Optional[str]] = set()
+        run_params: dict[tuple, GenerationParams] = {}
+        for key in runs:
+            span_voice, overrides = key
+            if span_voice not in voices:
+                voices[span_voice] = self._voice(None, span_voice, warnings)
+            run_params[key] = replace(params, **dict(overrides))
+            ignored.update(dict.fromkeys(run_params[key].unsupported(model)))
+            if language and (span_voice or voice_id) not in accent_checked:
+                accent_checked.add(span_voice or voice_id)
+                self._warn_accent(span_voice or voice_id, language, run_params[key], warnings)
+        if ignored:
+            warnings.insert(0, f"{MODEL_LABELS[model]} ignores {', '.join(ignored)}.")
+
         t0 = time.perf_counter()
-        wav, sr = self._render(segments, lambda texts: self.backend.synthesize(model, texts, voice, params, language, version))
-        details = {"model": MODEL_LABELS[model] + (f" {version}" if version else "")}
-        return SynthesisResult(audio=wav, sample_rate=sr, mode=model, language=language, voice=label,
+        wavs: dict[int, np.ndarray] = {}
+        sr = 0
+        for key, indices in runs.items():
+            out, sr = self.backend.synthesize(model, [segments[i].text for i in indices], voices[key[0]][0],
+                                              run_params[key], language, version)
+            wavs.update(zip(indices, out))
+        pieces = [A.silence(s.pause, sr) if s.is_pause else wavs[i] for i, s in enumerate(segments)]
+        details: dict[str, Any] = {"model": MODEL_LABELS[model] + (f" {version}" if version else "")}
+        used = list(dict.fromkeys(voices[k[0]][1] for k in runs))
+        if len(used) > 1:
+            details["voices"] = used
+        return SynthesisResult(audio=A.concat(pieces, sr), sample_rate=sr, mode=model, language=language, voice=label,
                                segments=sum(1 for s in segments if s.text), elapsed=time.perf_counter() - t0,
                                warnings=warnings, details=details)
 
-    @staticmethod
-    def _render(segments: list[Segment], call: Callable[[list[str]], tuple[list[np.ndarray], int]]) -> tuple[np.ndarray, int]:
-        """Synthesize the speech chunks, then interleave the requested pauses."""
-        wavs, sr = call([s.text for s in segments if s.text])
-        it = iter(wavs)
-        pieces = [A.silence(s.pause, sr) if s.is_pause else next(it) for s in segments]
-        return A.concat(pieces, sr), sr
+    def _warn_accent(self, voice_id: Optional[str], language: str, params: GenerationParams, warnings: list[str]) -> None:
+        """Warn when a voice speaks another language than the text: with CFG on, it lends its accent."""
+        if not voice_id or voice_id.lower() == DEFAULT_VOICE:
+            return
+        voice = self.library.get(voice_id)
+        cfg = params.cfg_weight if params.cfg_weight is not None else 0.5
+        if voice.language and voice.language != language and cfg > 0:
+            warnings.append(
+                f"The reference speaks {LANGUAGES.get(voice.language, voice.language)} but the text is "
+                f"{LANGUAGES[language]}, so the output may carry its accent. Set CFG / pace to 0 to avoid that.")
 
     def _voice(self, ref_audio: Optional[Audio], voice_id: Optional[str], warnings: list[str]) -> tuple[Optional[Audio], str]:
         """Reference clip for a request (None: the model's built-in voice) and a label for the metadata."""
