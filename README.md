@@ -169,7 +169,15 @@ The Windows steps below were tested end to end. The macOS and Linux setups use e
 
 The same live conversion with a desktop window instead of commands. You pick the voice (or **Add voice…** from a clip), the microphone and the output, which defaults to **CABLE Input**, then press **Start**. Run it from the repo with `uv run --extra chatterbox --extra stream poly-chatterbox-voice-changer`.
 
-To give it to people without Python, build a self-contained folder with torch and CUDA bundled (about 4–5 GB):
+To give it to people without Python, build the launcher, a single ~65 MB `PolyVoiceChanger.exe`:
+
+```
+powershell -File packaginguild-launcher.ps1
+```
+
+It writes `dist\launcher\PolyVoiceChanger.exe`. It carries [uv](https://docs.astral.sh/uv/) and MinGit, which are pinned and checksum-verified. On first run it installs Python 3.12, PyTorch with CUDA 12.8 and `poly-chatterbox[chatterbox,stream]` from this repo's `dev` branch into `%LOCALAPPDATA%\PolyVoiceChanger` (about 3 GB, shown in a progress window), then starts the window. On later runs it checks the branch and offers to update when there is a new commit, so push to `dev` to ship a change. Deleting that folder uninstalls everything.
+
+For offline installs, build a self-contained folder with torch and CUDA bundled (about 4–5 GB):
 
 ```
 powershell -File packaging\build.ps1 -Zip
