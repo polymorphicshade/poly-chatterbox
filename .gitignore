@@ -13,3 +13,4 @@ certs/
 # PyInstaller output (packaging/build.ps1)
 /build/
 /dist/
+/packaging/downloads/

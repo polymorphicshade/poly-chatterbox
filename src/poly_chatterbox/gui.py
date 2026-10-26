@@ -23,6 +23,8 @@ from typing import Callable, Optional
 APP_NAME = "Poly Voice Changer"
 VB_CABLE_URL = "https://vb-audio.com/Cable/"
 FROZEN = getattr(sys, "frozen", False)
+# A windowed EXE or pythonw (as the launcher starts it) has no stdout/stderr: log to a file instead.
+LOG_TO_FILE = FROZEN or sys.stdout is None
 
 
 def _app_dir() -> Path:
@@ -35,12 +37,13 @@ def _app_dir() -> Path:
 
 
 def _setup_frozen_environment() -> Path:
-    """Point the data dir at the user's profile and send stdout/stderr (absent in a windowed EXE) to a log file."""
+    """Point the data dir at the user's profile (EXE) and send stdout/stderr to a log file when there are none."""
     app_dir = _app_dir()
     app_dir.mkdir(parents=True, exist_ok=True)
     log_path = app_dir / "voice-changer.log"
     if FROZEN:
         os.environ.setdefault("POLY_CHATTERBOX_DATA_DIR", str(app_dir))
+    if LOG_TO_FILE:
         log = open(log_path, "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr = log
     return log_path
@@ -185,7 +188,7 @@ class VoiceChangerApp:
 
         msg = e.args[0] if isinstance(e, (ValueError, LookupError)) and e.args else str(e) or type(e).__name__
         self._append_log(f"Error: {msg}")
-        messagebox.showerror(APP_NAME, f"{msg}\n\nDetails are in {self.log_path}" if FROZEN else msg)
+        messagebox.showerror(APP_NAME, f"{msg}\n\nDetails are in {self.log_path}" if LOG_TO_FILE else msg)
         if self._stop is None:
             self.status.configure(text="")
 
