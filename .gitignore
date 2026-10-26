@@ -10,3 +10,6 @@ __pycache__/
 certs/
 # Generated audio
 *.wav
+# PyInstaller output (packaging/build.ps1)
+/build/
+/dist/

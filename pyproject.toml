@@ -47,6 +47,10 @@ stream = [
 [project.scripts]
 poly-chatterbox = "poly_chatterbox.cli:main"
 
+[project.gui-scripts]
+# Desktop window for live voice conversion; packaged as PolyVoiceChanger.exe by packaging/build.ps1.
+poly-chatterbox-voice-changer = "poly_chatterbox.gui:main"
+
 [dependency-groups]
 dev = ["pytest>=8"]
 

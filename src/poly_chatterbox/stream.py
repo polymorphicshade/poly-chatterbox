@@ -219,6 +219,13 @@ def list_devices(out=sys.stdout) -> int:
     return 0
 
 
+def device_choices(sd, kind: str) -> list[tuple[int, str]]:
+    """``(index, name)`` of the input or output devices on the system's default host API (each device once)."""
+    field = f"max_{kind}_channels"
+    api = sd.default.hostapi
+    return [(i, d["name"]) for i, d in enumerate(sd.query_devices()) if d[field] > 0 and d["hostapi"] == api]
+
+
 def find_device(sd, spec: Optional[str], kind: str) -> int:
     """Device index for a number, a name fragment, or (None) the system default input/output."""
     field = f"max_{kind}_channels"
@@ -246,8 +253,11 @@ def find_device(sd, spec: Optional[str], kind: str) -> int:
 
 def run(client, input_spec: Optional[str] = None, output_spec: Optional[str] = None,
         voice: Optional[str] = None, target_audio: Optional[Path] = None, threshold: Optional[float] = None,
-        silence_ms: int = 500, min_ms: int = 300, max_seconds: float = 15.0, log=None) -> int:
+        silence_ms: int = 500, min_ms: int = 300, max_seconds: float = 15.0, log=None,
+        stop: Optional[threading.Event] = None) -> int:
+    """Stream until Ctrl+C, or until ``stop`` is set (the GUI's Stop button)."""
     log = log or (lambda msg: print(msg, file=sys.stderr, flush=True))
+    stop = stop or threading.Event()
     sd = _sounddevice()
     in_idx, out_idx = find_device(sd, input_spec, "input"), find_device(sd, output_spec, "output")
     in_info, out_info = sd.query_devices(in_idx), sd.query_devices(out_idx)
@@ -265,6 +275,8 @@ def run(client, input_spec: Optional[str] = None, output_spec: Optional[str] = N
     noise = (np.random.default_rng(0).standard_normal(CONVERT_SAMPLE_RATE) * 0.02).astype(np.float32)
     convert((noise, CONVERT_SAMPLE_RATE))  # warm-up: loads the model and caches the target voice
     log(f"Ready in {time.perf_counter() - t0:.1f} s.")
+    if stop.is_set():
+        return 0
 
     blocks: queue.Queue = queue.Queue()
     playback = PlaybackBuffer()
@@ -293,13 +305,14 @@ def run(client, input_spec: Optional[str] = None, output_spec: Optional[str] = N
             log(f"Speech threshold {threshold:.4f} (change it with --threshold). Listening: talk, pause, and the "
                 "converted voice plays on the output. Ctrl+C to stop.")
             segmenter = PhraseSegmenter(in_sr, threshold, silence_ms, min_ms, max_seconds)
-            while True:
+            while not stop.is_set():
                 try:
                     block = blocks.get(timeout=0.5)
                 except queue.Empty:
                     continue
                 for phrase in segmenter.feed(block):
                     converter.submit(resample(phrase, in_sr, CONVERT_SAMPLE_RATE), CONVERT_SAMPLE_RATE)
+        log("Stopped.")
     except KeyboardInterrupt:
         log("Stopped.")
     finally:

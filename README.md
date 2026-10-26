@@ -17,7 +17,7 @@ A toolkit around [Chatterbox](https://github.com/resemble-ai/chatterbox) with a 
 | Vocal isolation (extract voices from a music track) | Isolate Vocals | `POST /api/vocals` | `poly-chatterbox vocals` |
 | Zero-shot voice cloning (≥ 5 s clip) | every TTS mode | `ref_audio` / `voice_id` on each endpoint | `--ref-audio` / `--voice` |
 | Voice conversion | Voice Conversion | `POST /api/vc` | `poly-chatterbox convert` |
-| Live voice conversion from a microphone (e.g. into Discord) | n/a (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
+| Live voice conversion from a microphone (e.g. into Discord) | Voice Changer desktop window / `PolyVoiceChanger.exe` (runs on your PC) | `POST /api/vc` per phrase | `poly-chatterbox stream` |
 | Voice library (built-in, 24 demo voices, your saved clones) | voice picker in every mode | `GET/POST/DELETE /api/voices` | `poly-chatterbox voices` |
 | Perth watermark detection | Watermark | `POST /api/watermark` | `poly-chatterbox watermark` |
 | Speech to text with Whisper | Transcribe | `POST /api/transcribe` | `poly-chatterbox transcribe` |
@@ -164,6 +164,18 @@ The Windows steps below were tested end to end. The macOS and Linux setups use e
 6. **Point Discord at the cable.** In User Settings → Voice & Video, set **Input Device** to **CABLE Output (VB-Audio Virtual Cable)**. Turn off **Noise Suppression**, **Echo Cancellation** and **Automatic Gain Control** (they can clip converted speech), and use **Let's Check** to confirm the level moves when you talk. Wear headphones so Discord doesn't pick up your speakers.
 
 7. **Optional: hear what Discord hears.** Windows Sound settings → Recording → **CABLE Output** → Properties → Listen → tick **Listen to this device** and choose your headphones. This adds a little delay.
+
+### Voice Changer window (Windows EXE for friends)
+
+The same live conversion with a desktop window instead of commands. You pick the voice (or **Add voice…** from a clip), the microphone and the output, which defaults to **CABLE Input**, then press **Start**. Run it from the repo with `uv run --extra chatterbox --extra stream poly-chatterbox-voice-changer`.
+
+To give it to people without Python, build a self-contained folder with torch and CUDA bundled (about 4–5 GB):
+
+```
+powershell -File packaging\build.ps1 -Zip
+```
+
+This writes `dist\PolyVoiceChanger\PolyVoiceChanger.exe` (keep the whole folder together), a friend-facing `README.txt` and `dist\PolyVoiceChanger.zip`. The build ends with a smoke test (`PolyVoiceChanger.exe --check`) that loads the model and converts a test clip. Each friend needs an NVIDIA GPU and VB-CABLE. The model (about 1 GB) downloads on the first Start. Voices, settings and the log go in `%LOCALAPPDATA%\PolyVoiceChanger`.
 
 ### macOS
 

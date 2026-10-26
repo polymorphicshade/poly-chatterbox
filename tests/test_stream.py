@@ -1,3 +1,4 @@
+import threading
 import time
 from types import SimpleNamespace
 
@@ -7,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from poly_chatterbox.api import create_app
 from poly_chatterbox.client import HttpClient, LocalClient
-from poly_chatterbox.stream import (LiveConverter, PhraseSegmenter, PlaybackBuffer, auto_threshold, find_device,
-                                    resample)
+from poly_chatterbox.stream import (LiveConverter, PhraseSegmenter, PlaybackBuffer, auto_threshold, device_choices,
+                                    find_device, resample)
 
 from .conftest import make_wav
 
@@ -168,3 +169,72 @@ def test_end_to_end_pipeline_without_hardware(engine, ref_wav):
                 live.submit(phrase, SR)
     live.close()
     assert 2 * 1.3 * 48000 < playback.queued < 2 * 1.5 * 48000  # two phrases, ~1.35 s each, at 48 kHz
+
+
+def test_device_choices_lists_each_device_once_on_the_default_host_api():
+    sd = FakeSD()
+    assert [i for i, _ in device_choices(sd, "output")] == [3, 4, 5]
+    assert [name for _, name in device_choices(sd, "input")][1] == "Microphone (Shure MV7+)"
+
+
+class FakeStreamSD(FakeSD):
+    """FakeSD whose input stream feeds a loud tone, then silence, to the callback in real time."""
+
+    def __init__(self):
+        super().__init__()
+        for d in self._devices:
+            d["default_samplerate"] = SR
+        outer = self
+
+        class InputStream:
+            def __init__(self, callback, blocksize, **kw):
+                self.callback, self.blocksize, self.running = callback, blocksize, False
+
+            def __enter__(self):
+                self.running = True
+                threading.Thread(target=self._feed, daemon=True).start()
+                return self
+
+            def _feed(self):
+                for b in blocks(0.6, 0.3) + blocks(5.0, 0.001):
+                    if not self.running:
+                        return
+                    self.callback(b[:, None], len(b), None, None)
+                    time.sleep(BLOCK / SR / 4)
+
+            def __exit__(self, *exc):
+                self.running = False
+                outer.closed = True
+
+        class OutputStream:
+            def __init__(self, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                pass
+
+        self.InputStream, self.OutputStream = InputStream, OutputStream
+        self.closed = False
+
+
+def test_run_converts_and_stops_when_the_stop_event_is_set(engine, monkeypatch):
+    from poly_chatterbox import stream
+
+    sd = FakeStreamSD()
+    monkeypatch.setattr(stream, "_sounddevice", lambda: sd)
+    logs, stop = [], threading.Event()
+
+    def log(msg):
+        logs.append(msg)
+        if "converted in" in msg:
+            stop.set()
+
+    done = threading.Thread(target=stream.run, args=(LocalClient(engine), "1", "4"),
+                            kwargs=dict(voice="podcast", threshold=0.05, log=log, stop=stop))
+    done.start()
+    done.join(timeout=10)
+    assert not done.is_alive() and sd.closed
+    assert any("converted in" in m for m in logs) and logs[-1] == "Stopped."
